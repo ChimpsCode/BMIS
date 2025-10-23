@@ -1,0 +1,47 @@
+[
+    {
+        "id": "msg_68e3f1b5aa191",
+        "from": "Admin",
+        "from_role": "admin",
+        "to": "staff",
+        "subject": "brgy certificate",
+        "message": "dadadaw",
+        "created_at": "2025-10-06 18:43:33"
+    },
+    {
+        "id": "msg_68e3f28b1871d",
+        "from": "Admin",
+        "from_role": "admin",
+        "to": "staff",
+        "subject": "meow",
+        "message": "adwadawd",
+        "created_at": "2025-10-06 18:47:07"
+    },
+    {
+        "id": "msg_68e3f2b1b9b22",
+        "from": "Staff",
+        "from_role": "staff",
+        "to": "resident",
+        "subject": "huhu",
+        "message": "adaqgwtg",
+        "created_at": "2025-10-06 18:47:45"
+    },
+    {
+        "id": "msg_68e3f5c5477f9",
+        "from": "Resident",
+        "from_role": "resident",
+        "to": "Barangay Kauswagan",
+        "subject": "brgy certificate",
+        "message": "meow meow",
+        "created_at": "2025-10-06 19:00:53"
+    },
+    {
+        "id": "msg_68f9cdd432656",
+        "from": "Admin",
+        "from_role": "admin",
+        "to": "staff",
+        "subject": "meeting",
+        "message": "tomorrow at 7am we will have the meeting at the langue",
+        "created_at": "2025-10-23 08:40:20"
+    }
+]
