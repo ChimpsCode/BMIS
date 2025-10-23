@@ -44,10 +44,19 @@ try {
 
     $complaint_id = $pdo->lastInsertId();
 
-    // Return inserted data (no join to residents table to avoid missing-table errors)
+    // Try to get resident full name from tbl_residents
+    try {
+        $rstmt = $pdo->prepare('SELECT CONCAT_WS(" ", first_name, middle_name, last_name, suffix) AS full_name FROM tbl_residents WHERE resident_id = :rid LIMIT 1');
+        $rstmt->execute([':rid' => $resident_id]);
+        $rrow = $rstmt->fetch(PDO::FETCH_ASSOC);
+        $resident_name = $rrow && !empty($rrow['full_name']) ? $rrow['full_name'] : ('Resident #' . $resident_id);
+    } catch (Exception $e) {
+        $resident_name = 'Resident #' . $resident_id;
+    }
+
     respond(true, [
         'id' => $complaint_id,
-        'name' => 'Resident #' . $resident_id,
+        'name' => $resident_name,
         'subject' => $subject,
         'message' => $details,
         'status' => 'Open'

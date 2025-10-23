@@ -146,6 +146,12 @@ include '../includes/header.php';
             }
             ?>
 
+            <?php
+            // GCash payment info (change these values as needed)
+            $gcash_name = 'jastin beber';
+            $gcash_number = '09166146564';
+            ?>
+
             <?php if ($viewerRole !== 'admin' && $viewerRole !== 'staff'): ?>
             <form method="post" id="requestForm">
                 <label for="document_type">Select Document Type</label>
@@ -159,6 +165,8 @@ include '../includes/header.php';
                 <div id="feeBox" style="margin-top:8px;display:none">
                     <div class="small muted">Fee: <strong id="feeAmount"></strong></div>
                     <div class="small muted">Please pay via GCash.</div>
+                    <div class="small" style="margin-top:6px">name: <strong><?php echo htmlspecialchars($gcash_name); ?></strong></div>
+                    <div class="small">number: <strong><?php echo htmlspecialchars($gcash_number); ?></strong></div>
                 </div>
 
                 <div style="margin-top:8px">
@@ -184,7 +192,7 @@ include '../includes/header.php';
 
             <script>
                 // Show fee when doc type selected
-                document.getElementById('document_type').addEventListener('change', function(e){
+                document.getElementById('document_type')?.addEventListener('change', function(e){
                     var opt = e.target.selectedOptions[0];
                     var fee = opt ? opt.getAttribute('data-fee') : null;
                     var box = document.getElementById('feeBox');
@@ -197,7 +205,165 @@ include '../includes/header.php';
                         amt.textContent = '';
                     }
                 });
+
+                // Handle status updates
+                function updateStatus(requestId) {
+                    const form = document.getElementById('status-form-' + requestId);
+                    if (form) {
+                        form.style.display = 'block';
+                    }
+                }
+
+                function cancelUpdate(requestId) {
+                    const form = document.getElementById('status-form-' + requestId);
+                    if (form) {
+                        form.style.display = 'none';
+                        form.querySelector('form').reset();
+                    }
+                }
+
+                function handleStatusUpdate(event, requestId) {
+                    event.preventDefault();
+                    const form = event.target;
+                    const status = form.querySelector('[name="new_status"]').value;
+                        let reason = '';
+                        const reasonField = form.querySelector('[name="reason"]');
+                    
+                        if (status === 'not granted') {
+                            reason = reasonField ? reasonField.value : '';
+                            if (!reason) {
+                                alert('Please provide a reason for not granting the request.');
+                                return;
+                            }
+                            // Format reason if it doesn't follow the template
+                            if (!reason.toLowerCase().includes('document is not granted')) {
+                                reason = 'Document is not granted (Reason: ' + reason + ')';
+                            }
+                        }
+
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+                    data.append('new_status', status);
+                        if (reason) {
+                        data.append('reason', reason);
+                    }
+
+                    fetch('update_request_status.php', {
+                        method: 'POST',
+                        body: data
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.success) {
+                            window.location.reload();
+                        } else {
+                            alert('Failed to update status: ' + (result.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error updating status: ' + error.message);
+                    });
+                }
+
+                // Mark as ready for pickup
+                function handleReady(requestId) {
+                    if (!confirm('Mark this request as ready for pickup?')) return;
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+                    data.append('new_status', 'ready');
+
+                    fetch('update_request_status.php', { method: 'POST', body: data })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (res.success) window.location.reload();
+                            else alert('Failed to update: ' + (res.error || 'Unknown'));
+                        }).catch(e => alert('Error: ' + e.message));
+                }
+
+                // Reject with reason
+                function handleReject(requestId) {
+                    let reason = prompt('Enter rejection reason (e.g. not available):');
+                    if (reason === null) return; // cancelled
+                    reason = reason.trim();
+                    if (!reason) { alert('Reason is required.'); return; }
+                    // format reason
+                    if (!reason.toLowerCase().includes('rejected')) {
+                        reason = 'Rejected (Reason: ' + reason + ')';
+                    }
+
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+                    data.append('new_status', 'rejected');
+                    data.append('reason', reason);
+
+                    fetch('update_request_status.php', { method: 'POST', body: data })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (res.success) window.location.reload();
+                            else alert('Failed to update: ' + (res.error || 'Unknown'));
+                        }).catch(e => alert('Error: ' + e.message));
+                }
+
+                function deleteRequest(requestId) {
+                    if (!confirm('Are you sure you want to delete this request?')) {
+                        return;
+                    }
+
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+
+                    fetch('delete_request.php', {
+                        method: 'POST',
+                        body: data
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.success) {
+                            const element = document.getElementById('request-' + requestId);
+                            if (element) {
+                                element.remove();
+                            }
+                        } else {
+                            alert('Failed to delete request: ' + (result.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error deleting request: ' + error.message);
+                    });
+                }
+
+                // Show/hide reason field based on status selection
+                document.querySelectorAll('[name="new_status"]').forEach(select => {
+                    select.addEventListener('change', function(e) {
+                        const reasonField = e.target.closest('form').querySelector('.reason-field');
+                        if (e.target.value === 'not granted') {
+                            reasonField.style.display = 'block';
+                                const textarea = reasonField.querySelector('textarea');
+                                textarea.required = true;
+                                if (!textarea.value) {
+                                    textarea.value = 'Document is not granted (Reason: )';
+                                }
+                        } else {
+                            reasonField.style.display = 'none';
+                            reasonField.querySelector('textarea').required = false;
+                        }
+                    });
+                });
             </script>
+
+            <style>
+                .btn-small {
+                    padding: 4px 8px;
+                    font-size: 12px;
+                }
+                .btn-danger {
+                    background-color: #dc2626;
+                    color: white;
+                }
+                .btn-danger:hover {
+                    background-color: #b91c1c;
+                }
+            </style>
 
             <hr style="margin:18px 0" />
 
@@ -205,11 +371,11 @@ include '../includes/header.php';
             <?php
             // Show recent requests (from DB)
             try {
-                if ($viewerRole === 'admin' || $viewerRole === 'staff' || $viewerRole === 'resident') {
+                if ($viewerRole === 'admin' || $viewerRole === 'staff') {
                     // admins and staff see all requests
-                    $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id ORDER BY r.date_requested DESC');
+                    $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id ORDER BY r.date_requested DESC');
                     $stmt->execute();
-                } else {
+                } elseif ($viewerRole === 'resident') {
                     // resident - only show their own requests (limit 20)
                     $residentFilter = null;
                     if (isset($_SESSION['resident_id'])) $residentFilter = (int)$_SESSION['resident_id'];
@@ -220,13 +386,18 @@ include '../includes/header.php';
                         if ($rr && !empty($rr['resident_id'])) $residentFilter = (int)$rr['resident_id'];
                     }
                     if ($residentFilter) {
-                        $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id WHERE r.resident_id = :rid ORDER BY r.date_requested DESC LIMIT 20');
+                        // include reason so residents can see denial reasons
+                        $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id WHERE r.resident_id = :rid ORDER BY r.date_requested DESC LIMIT 20');
                         $stmt->execute(['rid' => $residentFilter]);
                     } else {
                         // no resident mapping available, return empty
                         $recent = [];
                         $stmt = null;
                     }
+                } else {
+                    // other roles (guest) - no requests
+                    $recent = [];
+                    $stmt = null;
                 }
                 if ($stmt) $recent = $stmt->fetchAll();
             } catch (Exception $e) {
@@ -239,17 +410,41 @@ include '../includes/header.php';
                 echo '<div class="request-list">';
                 foreach($recent as $rq){
                     ?>
-                    <div class="request-card">
+                    <div class="request-card" id="request-<?php echo (int)$rq['request_id']; ?>">
                         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
                             <div>
                                 <div style="font-weight:700"><?php echo htmlspecialchars(trim($rq['first_name'] . ' ' . $rq['last_name'])); ?></div>
                                 <div class="small muted"><?php echo htmlspecialchars($rq['date_requested']); ?> · <strong><?php echo htmlspecialchars($rq['doc_name']); ?></strong></div>
+                                    <div class="status-display" style="margin-top:4px">
+                                        <?php if ($rq['status'] === 'ready'): ?>
+                                            <div class="small" style="color:#059669">Status: Ready for pickup</div>
+                                        <?php elseif ($rq['status'] === 'rejected' && !empty($rq['reason'])): ?>
+                                            <div class="small" style="color:#991b1b">Status: <?php echo htmlspecialchars($rq['reason']); ?></div>
+                                        <?php elseif ($rq['status'] === 'pending'): ?>
+                                            <div class="small" style="color:#d97706">Status: Pending</div>
+                                        <?php endif; ?>
+                                    </div>
                             </div>
                             <div class="text-right">
                                 <div class="small muted">Status</div>
                                 <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($rq['status']); ?></div>
+                                <?php if ($viewerRole === 'admin' || $viewerRole === 'staff'): ?>
+                                    <div style="margin-top:8px;display:flex;gap:4px;">
+                                        <button class="btn btn-small" onclick="updateStatus(<?php echo (int)$rq['request_id']; ?>)">Update Status</button>
+                                        <button class="btn btn-small btn-danger" onclick="deleteRequest(<?php echo (int)$rq['request_id']; ?>)">Delete</button>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
+                        <?php if (($viewerRole === 'admin' || $viewerRole === 'staff') && $rq['status'] === 'pending'): ?>
+                        <div class="status-update-form" id="status-form-<?php echo (int)$rq['request_id']; ?>" style="display:none;margin-top:12px">
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <button class="btn btn-small" onclick="handleReady(<?php echo (int)$rq['request_id']; ?>)">Mark Ready for pickup</button>
+                                <button class="btn btn-small btn-warning" onclick="handleReject(<?php echo (int)$rq['request_id']; ?>)">Reject</button>
+                                <button class="btn btn-small" onclick="cancelUpdate(<?php echo (int)$rq['request_id']; ?>)">Close</button>
+                            </div>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <?php
                 }

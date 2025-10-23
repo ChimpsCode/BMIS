@@ -42,7 +42,7 @@ include '../includes/header.php';
                     // Use LEFT JOIN on residents if present; if not, fallback to resident_id only
                     try {
                         $stmt = $pdo->query(
-                            'SELECT c.id AS complaint_id, c.resident_id, c.subject, c.details, c.status, c.created_at, COALESCE(r.name, NULL) AS resident_name FROM complaints c LEFT JOIN residents r ON c.resident_id = r.resident_id ORDER BY c.id DESC'
+                            "SELECT c.id AS complaint_id, c.resident_id, c.subject, c.details, c.status, c.created_at, CONCAT_WS(' ', r.first_name, r.middle_name, r.last_name, r.suffix) AS resident_name FROM complaints c LEFT JOIN tbl_residents r ON c.resident_id = r.resident_id ORDER BY c.id DESC"
                         );
                     } catch (Exception $e) {
                         // Fallback: no residents table
