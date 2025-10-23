@@ -65,9 +65,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!$showVerifyForm && empty($errors)) {
         try {
-            // ...existing code for new registration...
-            // (no change here)
-            // ...existing code for new registration...
+            // Insert new resident into tbl_residents
+            $insertResident = $pdo->prepare('INSERT INTO tbl_residents (first_name, middle_name, last_name, suffix, birthdate, gender, civil_status, occupation, citizenship, address, voter_status, relation_to_head, household_id, created_at, updated_at) VALUES (:fn,:mn,:ln,:sx,:bd,:gd,:cs,:oc,:ct,:ad,:vs,:rh,:hid,NOW(),NOW())');
+            $insertResident->execute([
+                ':fn' => $fields['first_name'],
+                ':mn' => $fields['middle_name'],
+                ':ln' => $fields['last_name'],
+                ':sx' => $fields['suffix'],
+                ':bd' => $fields['birthdate'],
+                ':gd' => $fields['gender'],
+                ':cs' => $fields['civil_status'],
+                ':oc' => $fields['occupation'],
+                ':ct' => $fields['citizenship'],
+                ':ad' => $fields['address'],
+                ':vs' => $fields['voter_status'],
+                ':rh' => $fields['relation_to_head'],
+                ':hid' => $fields['household_id']
+            ]);
+
+            $new_resident_id = (int)$pdo->lastInsertId();
+
+            // Create user account
+            $pw_hash = password_hash($password, PASSWORD_DEFAULT);
+            $stmt = $pdo->prepare('INSERT INTO tbl_users (username, password_hash, role, resident_id, account_status) VALUES (:u, :p, :role, :rid, :status)');
+            $stmt->execute([
+                ':u' => $username,
+                ':p' => $pw_hash,
+                ':role' => 'resident',
+                ':rid' => $new_resident_id,
+                ':status' => 'Active'
+            ]);
+
+            $_SESSION['user_id'] = (int)$pdo->lastInsertId();
+            $_SESSION['role'] = 'resident';
+            $_SESSION['resident_id'] = $new_resident_id;
+            $success = 'Account created. Redirecting...';
+            header('Refresh:1; url=dashboard.php');
+            exit;
         } catch (Exception $e) {
             $errors[] = 'Registration error: ' . $e->getMessage();
         }

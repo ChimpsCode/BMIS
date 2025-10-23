@@ -1,0 +1,70 @@
+<?php
+// Prevent any HTML output
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+
+header('Content-Type: application/json');
+session_start();
+require_once __DIR__ . '/../includes/db.php';
+
+// Simple JSON response helper
+function respond($ok, $data = []) {
+    echo json_encode(array_merge(['ok' => $ok], $data));
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    respond(false, ['error' => 'Invalid request method']);
+}
+
+$subject = isset($_POST['subject']) ? trim($_POST['subject']) : '';
+$details = isset($_POST['message']) ? trim($_POST['message']) : '';
+
+if ($subject === '' || $details === '') {
+    respond(false, ['error' => 'Subject and complaint details are required']);
+}
+
+try {
+    // Get resident_id from session
+    if (!isset($_SESSION['resident_id'])) {
+        respond(false, ['error' => 'You must be logged in to submit a complaint']);
+    }
+    $resident_id = $_SESSION['resident_id'];
+
+    // Insert the complaint
+    $stmt = $pdo->prepare('INSERT INTO complaints (resident_id, subject, details, status) VALUES (:resident_id, :subject, :details, :status)');
+    $stmt->execute([
+        ':resident_id' => $resident_id,
+        ':subject' => $subject,
+        ':details' => $details,
+        ':status' => 'Open'
+    ]);
+
+    $id = $pdo->lastInsertId();
+
+    // Get the inserted complaint with resident name
+    $stmt = $pdo->prepare('
+        SELECT c.complaint_id, c.subject, c.details, c.status, r.name as resident_name 
+        FROM complaints c 
+        JOIN residents r ON c.resident_id = r.resident_id 
+        WHERE c.complaint_id = :complaint_id 
+        LIMIT 1
+    ');
+    $stmt->execute([':complaint_id' => $complaint_id]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($row) {
+        respond(true, [
+            'id' => $row['complaint_id'],
+            'name' => $row['resident_name'],
+            'subject' => $row['subject'],
+            'message' => $row['details'],
+            'status' => $row['status']
+        ]);
+    }
+
+} catch (Exception $e) {
+    respond(false, ['error' => $e->getMessage()]);
+}
+
+?>

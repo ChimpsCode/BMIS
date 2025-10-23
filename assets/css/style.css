@@ -69,10 +69,25 @@ body {
 
 /* Document request grid for residents */
 .doc-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:14px}
-.doc-card{background:linear-gradient(180deg,var(--card),#fff);border-radius:12px;padding:24px;box-shadow:0 8px 22px rgba(12,20,40,0.06);display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;border:1px solid rgba(8,15,30,0.03);text-align:center;gap:10px;min-height:160px}
-.doc-card h4{margin:0;color:var(--accent);font-size:1.05rem}
-.doc-card p{margin:6px 0 0 0;color:var(--muted);font-size:0.95rem}
-.doc-card .btn{margin-top:12px}
+.doc-card{
+    background: #e7e3e3;
+    border-radius:12px;
+    padding:24px;
+    box-shadow:0 8px 22px rgba(12,20,40,0.06);
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    border:1px solid rgba(8,15,30,0.03);
+    text-align:center;
+    gap:10px;
+    min-height:160px;
+    text-decoration: none;
+}
+.doc-card h4{margin:0;color:var(--accent);font-size:1.05rem;text-decoration:none}
+.doc-card p{margin:6px 0 0 0;color:var(--muted);font-size:0.95rem;text-decoration:none}
+.doc-card .btn{margin-top:12px;text-decoration:none}
 .doc-card:hover{transform:translateY(-4px);box-shadow:0 12px 30px rgba(12,20,40,0.08)}
 
 /* Messages UI */
@@ -217,6 +232,11 @@ table tbody td{padding:12px 8px;border-top:1px solid #f1f4f8}
     flex-direction:column;
     gap:12px
 }
+
+/* Modal for complaint/feedback */
+#complaintModal { display: none; }
+#complaintModal textarea, #complaintModal input { width: 100%; box-sizing: border-box; }
+#complaintModal .btn { min-width: 86px; }
 .request-card,.complaint-card{
     background:var(--card);
     border-radius:10px;
