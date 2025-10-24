@@ -16,7 +16,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['request_id'])) {
     try {
         $stmt = $pdo->prepare('DELETE FROM tbl_requests WHERE request_id = :id');
         $stmt->execute(['id' => $request_id]);
-        
+        // log deletion
+        try {
+            $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
+            $logStmt->execute(['uid' => isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null, 'act' => 'Deleted request_id ' . $request_id, 'atype' => 'DELETE']);
+        } catch (Exception $e) { /* ignore logging errors */ }
+
         echo json_encode(['success' => true]);
     } catch (Exception $e) {
         http_response_code(500);

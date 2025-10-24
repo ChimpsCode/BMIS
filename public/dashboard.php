@@ -1,4 +1,10 @@
 <?php
+// Start session first
+if (session_status() === PHP_SESSION_NONE) session_start();
+
+// Include database connection early
+require_once __DIR__ . '/../includes/db.php';
+
 $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch role via ?role=admin|staff|resident
 ?>
 <!doctype html>
@@ -102,6 +108,30 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 
             </div>
         </div>
+        <div class="card" style="margin-top:12px">
+            <h3>Recent Admin/Staff Logs</h3>
+            <?php
+            try {
+                $logStmt = $pdo->prepare('SELECT l.log_id, l.user_id, l.activity, l.timestamp, l.action_type, u.username FROM tbl_logs l LEFT JOIN tbl_users u ON l.user_id = u.user_id WHERE u.role IN (\'admin\', \'staff\') ORDER BY l.timestamp DESC LIMIT 20');
+                $logStmt->execute();
+                $logs = $logStmt->fetchAll(PDO::FETCH_ASSOC);
+                if (empty($logs)) {
+                    echo '<div class="muted">No recent admin/staff logs.</div>';
+                } else {
+                    echo '<ul style="list-style:none;padding:0;margin:0">';
+                    foreach ($logs as $lg) {
+                        $who = $lg['username'] ? htmlspecialchars($lg['username']) : ('User #' . (int)$lg['user_id']);
+                        $ts = htmlspecialchars(date('Y-m-d H:i', strtotime($lg['timestamp'])));
+                        $atype = $lg['action_type'] ? htmlspecialchars($lg['action_type']) : '';
+                        echo '<li style="padding:8px 0;border-bottom:1px solid var(--border)"><strong>' . $who . '</strong> — ' . htmlspecialchars($lg['activity']) . ' <span class="muted">' . $ts . ($atype ? ' · ' . $atype : '') . '</span></li>';
+                    }
+                    echo '</ul>';
+                }
+            } catch (Exception $e) {
+                echo '<div class="muted">Unable to load logs.</div>';
+            }
+            ?>
+        </div>
     <?php endif; ?>
     <?php if ($currentRole === 'resident'): ?>
         <div class="card">
@@ -110,87 +140,226 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
             <div class="doc-grid">
                 <a class="doc-card" href="document_requests.php?type=certificate_of_residency">
                     <h4>Brgy Certificate</h4>
-                    
                     <span class="btn">Request</span>
                 </a>
                 <a class="doc-card" href="document_requests.php?type=barangay_clearance">
                     <h4>Brgy Clearance</h4>
-                   
                     <span class="btn">Request</span>
                 </a>
                 <a class="doc-card" href="document_requests.php?type=cedula">
                     <h4>Brgy Cedula</h4>
-                    
                     <span class="btn">Request</span>
                 </a>
                 <a class="doc-card" href="document_requests.php?type=certificate_of_indigency">
                     <h4>Certificate of Indigency</h4>
-                    
                     <span class="btn">Request</span>
                 </a>
             </div>
         </div>
-    <?php endif; ?>
-    <div class="card">
-        <h2>Resident Document Requests</h2>
-        <p class="muted">Recent requests and activity. Use the logs panel to trace approvals/deletions/resolutions.</p>
-        <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:12px">
-            <div class="card">
-                <h3>Requests</h3>
-                <div style="overflow:auto">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Request ID</th>
-                                <th>Resident</th>
-                                <th>Document</th>
-                                <th>Status</th>
-                                <th>Actioned By</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>#REQ-0012</td>
-                                <td>Juan Dela Cruz</td>
-                                <td>Certification of Residency</td>
-                                <td>Approved</td>
-                                <td>Admin Maria</td>
-                            </tr>
-                            <tr>
-                                <td>#REQ-0013</td>
-                                <td>Anna Santos</td>
-                                <td>Barangay Clearance</td>
-                                <td>Pending</td>
-                                <td>-</td>
-                            </tr>
-                            <tr>
-                                <td>#REQ-0014</td>
-                                <td>Pedro Reyes</td>
-                                <td>ID Replacement</td>
-                                <td>Processed</td>
-                                <td>Staff Ramon</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-            <div class="card">
-                <h3>Activity Logs</h3>
-                <div style="padding:8px;margin-top:8px">
-                    <ul style="list-style:none;padding:0;margin:0">
-                        <li class="small"><strong>Admin Maria</strong> approved <em>#REQ-0012</em> (Certification of Residency) — <span class="muted">2025-10-06 14:22</span></li>
-                        <hr />
-                        <li class="small"><strong>Staff Ramon</strong> processed <em>#REQ-0014</em> (ID Replacement) — <span class="muted">2025-10-05 09:10</span></li>
-                        <hr />
-                        <li class="small"><strong>Admin Jose</strong> deleted resident record <em>#RES-047</em> (Ana Lopez) — <span class="muted">2025-09-28 11:03</span></li>
-                        <hr />
-                        <li class="small"><strong>Staff Claire</strong> marked complaint <em>#CMP-210</em> as resolved — <span class="muted">2025-09-30 16:45</span></li>
-                    </ul>
-                </div>
-            </div>
+
+        <div class="card">
+        <h2>Activity Logs</h2>
+        <p class="muted">Track all your activities including document requests, complaints, and feedback.</p>
+        <div style="margin-top:12px">
+            <?php
+            try {
+                // Check if we have a valid resident ID from session
+                $resident_id = isset($_SESSION['resident_id']) ? (int)$_SESSION['resident_id'] : null;
+                
+                if ($resident_id && isset($pdo)) {
+                    // Fetch document requests
+                    $stmt = $pdo->prepare(
+                        'SELECT 
+                            r.request_id as id,
+                            d.doc_name as title,
+                            r.status,
+                            r.date_requested as date,
+                            r.pending_status,
+                            r.payment_status,
+                            "document" as type
+                         FROM tbl_requests r 
+                         LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id 
+                         WHERE r.resident_id = :rid'
+                    );
+                    $stmt->execute([':rid' => $resident_id]);
+                    $requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                    // Fetch complaints
+                    $stmt = $pdo->prepare(
+                        'SELECT 
+                            id,
+                            subject as title,
+                            status,
+                            created_at as date,
+                            "complaint" as type
+                         FROM complaints 
+                         WHERE resident_id = :rid 
+                         AND (soft_delete = 0 OR soft_delete IS NULL)'
+                    );
+                    $stmt->execute([':rid' => $resident_id]);
+                    $complaints = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                    // Combine and sort all activities
+                    $activities = array_merge($requests, $complaints);
+                    usort($activities, function($a, $b) {
+                        return strtotime($b['date']) - strtotime($a['date']);
+                    });
+
+                    // Keep only the most recent 15 activities
+                    $activities = array_slice($activities, 0, 15);
+
+                    if (empty($activities)) {
+                        echo '<div class="muted" style="text-align:center;padding:20px">No activities found.</div>';
+                    } else {
+                        echo '<div class="activity-log" style="max-height:500px;overflow-y:auto">';
+                        foreach ($activities as $activity) {
+                            $icon = $activity['type'] === 'document' ? '📄' : '💬';
+                            $status = isset($activity['pending_status']) && !empty($activity['pending_status']) 
+                                    ? $activity['pending_status'] 
+                                    : $activity['status'];
+                            
+                            $statusColor = 'inherit';
+                            $statusLower = strtolower($status);
+                            if ($statusLower === 'approved' || $statusLower === 'ready for pickup' || $statusLower === 'completed') {
+                                $statusColor = '#059669'; // green
+                            } elseif ($statusLower === 'pending' || $statusLower === 'processing') {
+                                $statusColor = '#d97706'; // amber
+                            }
+
+                            $date = date('M j, Y', strtotime($activity['date']));
+                            $id = isset($activity['request_id']) 
+                                ? '#REQ-' . str_pad($activity['request_id'], 4, '0', STR_PAD_LEFT)
+                                : '#' . $activity['id'];
+                            
+                            $itemId = $activity['type'] === 'document' ? 'request-' . $activity['id'] : 'complaint-' . $activity['id'];
+                            
+                            echo '<div class="activity-item" id="' . $itemId . '" style="padding:12px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:start">';
+                            echo '<div style="font-size:1.5rem">' . $icon . '</div>';
+                            echo '<div style="flex:1">';
+                            echo '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">';
+                            echo '<div>';
+                            echo '<div style="font-weight:500">' . htmlspecialchars($activity['title']) . '</div>';
+                            echo '<div class="small muted">' . $date . ' · ' . ucfirst($activity['type']) . ' ' . $id . '</div>';
+                            echo '</div>';
+                            echo '<div style="display:flex;align-items:center;gap:8px">';
+                            echo '<div style="color:' . $statusColor . ';font-weight:500">' . htmlspecialchars($status) . '</div>';
+                            
+                            // Add delete button based on type, status and viewer role
+                            $canDelete = false;
+                            $deleteFunction = '';
+                            if ($activity['type'] === 'document') {
+                                // If admin/staff viewing, allow server-side delete; residents can cancel pending requests
+                                if (isset($currentRole) && ($currentRole === 'admin' || $currentRole === 'staff')) {
+                                    $canDelete = true;
+                                    $deleteFunction = 'adminDeleteRequest(' . $activity['id'] . ')';
+                                } else {
+                                    $statusLower = strtolower($status);
+                                    if ($statusLower === 'pending' || $statusLower === 'processing' || $statusLower === '') {
+                                        $canDelete = true;
+                                        $deleteFunction = 'cancelRequest(' . $activity['id'] . ')';
+                                    }
+                                }
+                            } else if ($activity['type'] === 'complaint') {
+                                // complaints: resident-side hide
+                                $canDelete = true;
+                                $deleteFunction = 'residentHideComplaint(' . $activity['id'] . ')';
+                            }
+                            
+                            if ($canDelete) {
+                                echo '<button onclick="' . $deleteFunction . '" class="btn btn-danger" style="padding:4px 8px;font-size:0.85rem">Delete</button>';
+                            }
+                            
+                            echo '</div>';
+                            echo '</div>';
+
+                            if (isset($activity['payment_status']) && $activity['payment_status']) {
+                                echo '<div class="small muted" style="margin-top:4px">Payment Status: ' . htmlspecialchars($activity['payment_status']) . '</div>';
+                            }
+                            echo '</div>';
+                            echo '</div>';
+                        }
+                        echo '</div>';
+                    }
+                } else {
+                    echo '<div class="muted" style="text-align:center;padding:20px">Please log in to view your document requests.</div>';
+                }
+            } catch (Exception $e) {
+                echo '<div class="muted">Could not load document requests. Please try again later.</div>';
+            }
+            ?>
         </div>
     </div>
+    <?php endif; ?>
 </main>
+
+<script>
+// Cancel a pending document request (resident)
+function cancelRequest(requestId){
+    if (!confirm('Cancel this request? This action cannot be undone.')) return;
+    fetch('cancel_request.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'request_id=' + encodeURIComponent(requestId)
+    }).then(r => r.json()).then(res => {
+        if (res && res.success) {
+            const el = document.getElementById('request-' + requestId);
+            if (el) el.remove();
+            alert('Request cancelled.');
+        } else {
+            alert('Unable to cancel: ' + (res && res.error ? res.error : 'Unknown'));
+        }
+    }).catch(e => alert('Error: ' + e.message));
+}
+
+// Resident-side hide for complaints (localStorage)
+function residentHideComplaint(complaintId){
+    if (!confirm('Delete this complaint from your view? Admins will still see it.')) return;
+    try{
+        const key = 'hidden_complaints';
+        const raw = localStorage.getItem(key);
+        const arr = raw ? JSON.parse(raw) : [];
+        if (!arr.includes(complaintId)) arr.push(complaintId);
+        localStorage.setItem(key, JSON.stringify(arr));
+        const el = document.getElementById('complaint-' + complaintId);
+        if (el) el.remove();
+        alert('Complaint hidden from your view.');
+    } catch(e){
+        alert('Error hiding complaint: ' + e.message);
+    }
+}
+
+// On load hide complaints previously hidden by resident
+(function(){
+    try{
+        const raw = localStorage.getItem('hidden_complaints');
+        const arr = raw ? JSON.parse(raw) : [];
+        arr.forEach(id => {
+            const el = document.getElementById('complaint-' + id);
+            if (el) el.remove();
+        });
+    } catch(e){ /* ignore */ }
+})();
+
+// Admin/server-side delete for requests
+function adminDeleteRequest(requestId) {
+    if (!confirm('Delete this request permanently? This cannot be undone.')) return;
+    const data = new FormData();
+    data.append('request_id', requestId);
+
+    fetch('delete_request.php', {
+        method: 'POST',
+        body: data
+    }).then(r => r.json()).then(res => {
+        if (res && res.success) {
+            const el = document.getElementById('request-' + requestId);
+            if (el) el.remove();
+            alert('Request deleted.');
+        } else {
+            alert('Unable to delete: ' + (res && res.error ? res.error : 'Unknown'));
+        }
+    }).catch(e => alert('Error: ' + e.message));
+}
+</script>
 
 </body>
 </html>

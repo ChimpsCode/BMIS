@@ -21,6 +21,8 @@ try {
 
     $subject = isset($_POST['subject']) ? trim($_POST['subject']) : '';
     $details = isset($_POST['message']) ? trim($_POST['message']) : '';
+    // optional type: 'complaint' or 'feedback'
+    $type = isset($_POST['type']) ? trim($_POST['type']) : 'complaint';
 
     if ($subject === '' || $details === '') {
         respond(false, ['error' => 'Subject and complaint details are required']);
@@ -29,14 +31,37 @@ try {
     // Use session resident_id when available, otherwise fallback to 1 for testing
     $resident_id = isset($_SESSION['resident_id']) ? $_SESSION['resident_id'] : 1;
 
-    // Insert complaint
-    $stmt = $pdo->prepare('INSERT INTO complaints (resident_id, subject, details, status) VALUES (:resident_id, :subject, :details, :status)');
-    $ok = $stmt->execute([
-        ':resident_id' => $resident_id,
-        ':subject' => $subject,
-        ':details' => $details,
-        ':status' => 'Open'
-    ]);
+    // Ensure complaints table has a `type` column; add if missing
+    try {
+        $check = $pdo->query("SHOW COLUMNS FROM complaints LIKE 'type'");
+        $hasType = (bool)$check->fetch();
+        if (!$hasType) {
+            $pdo->exec("ALTER TABLE complaints ADD COLUMN `type` VARCHAR(30) DEFAULT 'complaint'");
+        }
+    } catch (Exception $e) {
+        // ignore if alter fails; insertion will still try without type
+    }
+
+    // Insert complaint/feedback
+    if (isset($hasType) && $hasType !== false) {
+        $stmt = $pdo->prepare('INSERT INTO complaints (resident_id, subject, details, status, `type`) VALUES (:resident_id, :subject, :details, :status, :type)');
+        $ok = $stmt->execute([
+            ':resident_id' => $resident_id,
+            ':subject' => $subject,
+            ':details' => $details,
+            ':status' => 'Open',
+            ':type' => $type
+        ]);
+    } else {
+        // fallback if type column couldn't be added or detected
+        $stmt = $pdo->prepare('INSERT INTO complaints (resident_id, subject, details, status) VALUES (:resident_id, :subject, :details, :status)');
+        $ok = $stmt->execute([
+            ':resident_id' => $resident_id,
+            ':subject' => $subject,
+            ':details' => $details,
+            ':status' => 'Open'
+        ]);
+    }
 
     if (!$ok) {
         respond(false, ['error' => 'Failed to insert complaint']);

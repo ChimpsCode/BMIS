@@ -38,6 +38,12 @@ include '../includes/header.php';
                         $upd = $pdo->prepare('UPDATE tbl_requests SET status = :st, handled_by = :hb, claim_date = :cd WHERE request_id = :id');
                         $upd->execute(['st' => $newStatus, 'hb' => $handledBy, 'cd' => $claimDate, 'id' => $reqId]);
                         echo '<div class="card" style="background:#ecfdf5;border:1px solid #bbf7d0;color:#065f46;margin-bottom:12px">Request updated.</div>';
+                        // log admin/staff action
+                        try {
+                            $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
+                            $actText = 'Updated request_id ' . $reqId . ' to status ' . $newStatus;
+                            $logStmt->execute(['uid' => $handledBy, 'act' => $actText, 'atype' => 'UPDATE']);
+                        } catch (Exception $e) { /* ignore logging errors */ }
                     } catch (Exception $e) {
                         // if claim_date column missing, attempt to add it and retry once
                         if (strpos($e->getMessage(), 'Unknown column') !== false) {
@@ -297,6 +303,30 @@ include '../includes/header.php';
                     });
                 }
 
+                function cancelRequest(requestId) {
+                    if (!confirm('Cancel this request? This action cannot be undone.')) return;
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+
+                    fetch('cancel_request.php', {
+                        method: 'POST',
+                        body: data
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.success) {
+                            const element = document.getElementById('request-' + requestId);
+                            if (element) element.remove();
+                            alert('Request cancelled.');
+                        } else {
+                            alert('Failed to cancel request: ' + (result.error || 'Unknown error'));
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error cancelling request: ' + error.message);
+                    });
+                }
+
                 // Show/hide reason field based on status selection
                 document.querySelectorAll('[name="new_status"]').forEach(select => {
                     select.addEventListener('change', function(e) {
@@ -332,7 +362,8 @@ include '../includes/header.php';
 
             <hr style="margin:18px 0" />
 
-            <h3>Recent Requests</h3>
+            <h3>Your Document Requests</h3>
+            <p class="muted" style="margin:4px 0 12px 0">Track the status of your document requests below.</p>
             <?php
             // Show recent requests (from DB)
             try {
@@ -378,8 +409,8 @@ include '../includes/header.php';
                     <div class="request-card" id="request-<?php echo (int)$rq['request_id']; ?>">
                         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
                             <div>
-                                <div style="font-weight:700"><?php echo htmlspecialchars(trim($rq['first_name'] . ' ' . $rq['last_name'])); ?></div>
-                                <div class="small muted"><?php echo htmlspecialchars($rq['date_requested']); ?> · <strong><?php echo htmlspecialchars($rq['doc_name']); ?></strong></div>
+                                <div style="font-weight:700"><?php echo htmlspecialchars($rq['doc_name']); ?></div>
+                                <div class="small muted"><?php echo htmlspecialchars($rq['date_requested']); ?> · #REQ-<?php echo str_pad((int)$rq['request_id'], 4, '0', STR_PAD_LEFT); ?></div>
                                     <div class="status-display" style="margin-top:4px">
                                         <?php
                                         $ps = isset($rq['pending_status']) ? strtolower($rq['pending_status']) : '';
@@ -413,6 +444,19 @@ include '../includes/header.php';
                                     <button class="btn btn-small" onclick="handleRelease(<?php echo (int)$rq['request_id']; ?>)">Released</button>
                                     <button class="btn btn-small btn-warning" onclick="handleFailed(<?php echo (int)$rq['request_id']; ?>)">Failed</button>
                                     <button class="btn btn-small btn-danger" onclick="deleteRequest(<?php echo (int)$rq['request_id']; ?>)">Delete</button>
+                                </div>
+                                <?php elseif ($viewerRole === 'resident'): ?>
+                                <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end;">
+                                    <?php
+                                    // Allow resident to cancel their own pending/processing requests
+                                    $ps = isset($rq['pending_status']) ? strtolower($rq['pending_status']) : '';
+                                    $st = isset($rq['status']) ? strtolower($rq['status']) : '';
+                                    if ($ps === 'pending' || $ps === 'processing' || $st === 'pending' || $st === 'processing' || $st === '') {
+                                        ?>
+                                        <button class="btn btn-small btn-danger" onclick="cancelRequest(<?php echo (int)$rq['request_id']; ?>)">Delete</button>
+                                        <?php
+                                    }
+                                    ?>
                                 </div>
                                 <?php endif; ?>
                             </div>

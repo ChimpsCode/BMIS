@@ -20,8 +20,8 @@ include '../includes/header.php';
                 </div>
                 <div style="display:flex;gap:8px;align-items:flex-start">
                     <!-- Action buttons visible to residents for creating items -->
-                    <a href="#" class="btn" style="padding:8px 12px;font-size:0.95rem;text-decoration:none">+Complaint</a>
-                    <a href="#" class="btn" style="padding:8px 12px;font-size:0.95rem;text-decoration:none">+Feedback</a>
+                    <a href="#" id="openComplaintBtn" class="btn" style="padding:8px 12px;font-size:0.95rem;text-decoration:none">+Complaint</a>
+                    <a href="#" id="openFeedbackBtn" class="btn" style="padding:8px 12px;font-size:0.95rem;text-decoration:none">+Feedback</a>
                 </div>
             </div>
 
@@ -88,14 +88,17 @@ include '../includes/header.php';
                             </div>
                             <div class="text-right">
                                     <div class="small muted">Status</div>
-                                    <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($c['status']); ?></div>
+                                        <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($c['status']); ?></div>
+                                        <?php if (isset($c['status']) && strtolower($c['status']) === 'resolved'): ?>
+                                            <div class="small" style="color:#059669;font-weight:600;margin-top:6px">Resolved!</div>
+                                        <?php endif; ?>
                                 </div>
                         </div>
                         <div style="margin-top:8px;color:var(--muted)"><?php echo nl2br(htmlspecialchars($c['details'])); ?></div>
                         <?php if ($role !== 'resident') { ?>
                         <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
-                            <a href="#" class="btn ghost">Reply</a>
-                            <a href="#" class="btn">Mark Resolved</a>
+                            <button class="btn ghost" onclick="replyComplaint(<?php echo (int)$c['complaint_id']; ?>)">Reply</button>
+                            <button class="btn" onclick="markResolved(<?php echo (int)$c['complaint_id']; ?>)">Mark Resolved</button>
                             <button class="btn btn-danger" onclick="softDeleteComplaint(<?php echo (int)$c['complaint_id']; ?>)">Delete</button>
                         </div>
                         <?php } else { ?>
@@ -118,6 +121,7 @@ include '../includes/header.php';
     <div style="width:520px;max-width:96%;background:var(--card);padding:18px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,0.35)">
         <h3 style="margin:0 0 8px 0">New Complaint</h3>
         <form id="complaintForm">
+            <input type="hidden" name="type" id="cf-type" value="complaint">
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
                 <input type="text" name="subject" id="cf-subject" placeholder="Subject" required />
                 <textarea name="message" id="cf-message" placeholder="Describe your complaint" rows="5" required></textarea>
@@ -137,10 +141,24 @@ document.addEventListener('DOMContentLoaded', function(){
     const form = document.getElementById('complaintForm');
     const list = document.querySelector('.complaint-list');
 
-    if (openBtn) {
-        openBtn.addEventListener('click', function(e){
+    // Open complaint or feedback modal; set hidden type field so server records type
+    const openComplaintBtn = document.getElementById('openComplaintBtn');
+    const openFeedbackBtn = document.getElementById('openFeedbackBtn');
+    if (openComplaintBtn) {
+        openComplaintBtn.addEventListener('click', function(e){
             e.preventDefault();
             modal.style.display = 'flex';
+            document.getElementById('cf-type').value = 'complaint';
+            document.getElementById('cf-subject').placeholder = 'Subject';
+            document.getElementById('cf-subject').focus();
+        });
+    }
+    if (openFeedbackBtn) {
+        openFeedbackBtn.addEventListener('click', function(e){
+            e.preventDefault();
+            modal.style.display = 'flex';
+            document.getElementById('cf-type').value = 'feedback';
+            document.getElementById('cf-subject').placeholder = 'Subject (feedback)';
             document.getElementById('cf-subject').focus();
         });
     }
@@ -218,6 +236,61 @@ document.addEventListener('DOMContentLoaded', function(){
                 alert('Failed to archive: ' + (res.error || 'Unknown'));
             }
         }).catch(e => alert('Error: ' + e.message));
+    }
+
+    // Mark complaint as resolved (admin/staff)
+    window.markResolved = function(complaintId){
+        if (!confirm('Mark this complaint as resolved?')) return;
+        fetch('resolve_complaint.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'complaint_id=' + encodeURIComponent(complaintId) })
+            .then(r => r.json()).then(res => {
+                if (res.success) {
+                    // show a mini green text on the complaint card
+                    const el = document.getElementById('complaint-' + complaintId);
+                    if (el) {
+                        const statBox = el.querySelector('.text-right');
+                        if (statBox) {
+                            const badge = document.createElement('div');
+                            badge.className = 'small';
+                            badge.style.color = '#059669';
+                            badge.style.fontWeight = '600';
+                            badge.style.marginTop = '6px';
+                            badge.textContent = 'Resolved!';
+                            statBox.appendChild(badge);
+                        }
+                    }
+                } else {
+                    alert('Failed: ' + (res.error || 'Unknown'));
+                }
+            }).catch(e => alert('Error: ' + e.message));
+    }
+
+    // Reply to complaint (admin/staff) — open prompt then send reply to resident inbox
+    window.replyComplaint = function(complaintId){
+        const txt = prompt('Type your reply to the resident:');
+        if (txt === null) return;
+        const data = new FormData();
+        data.append('complaint_id', complaintId);
+        data.append('message', txt);
+        fetch('reply_complaint.php', { method: 'POST', body: data })
+            .then(r => r.json()).then(res => {
+                if (res.success) {
+                    // attach a small inline note to the complaint card so admin sees reply was sent
+                    const el = document.getElementById('complaint-' + complaintId);
+                    if (el) {
+                        const note = document.createElement('div');
+                        note.className = 'small';
+                        note.style.background = '#ecfdf5';
+                        note.style.border = '1px solid #bbf7d0';
+                        note.style.color = '#065f46';
+                        note.style.padding = '6px';
+                        note.style.marginTop = '8px';
+                        note.textContent = 'Reply sent to resident.';
+                        el.appendChild(note);
+                    }
+                } else {
+                    alert('Failed to send reply: ' + (res.error || 'Unknown'));
+                }
+            }).catch(e => alert('Error: ' + e.message));
     }
 
     // Resident-side hide: store hidden complaint ids in localStorage per resident

@@ -34,6 +34,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'hb' => $handled_by,
                     'id' => $request_id
                 ]);
+                try {
+                    $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
+                    $logStmt->execute(['uid' => $handled_by, 'act' => 'Marked request_id ' . $request_id . ' as Ready for Pick Up', 'atype' => 'UPDATE']);
+                } catch (Exception $e) { /* ignore */ }
                 break;
 
             case 'release':
@@ -44,6 +48,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'hb' => $handled_by,
                     'id' => $request_id
                 ]);
+                try {
+                    $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
+                    $logStmt->execute(['uid' => $handled_by, 'act' => 'Released request_id ' . $request_id, 'atype' => 'UPDATE']);
+                } catch (Exception $e) { /* ignore */ }
                 break;
 
             case 'failed':
@@ -56,6 +64,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'hb' => $handled_by,
                     'id' => $request_id
                 ]);
+                try {
+                    $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
+                    $logStmt->execute(['uid' => $handled_by, 'act' => 'Marked request_id ' . $request_id . ' as Failed' . ($reason ? ': ' . $reason : ''), 'atype' => 'UPDATE']);
+                } catch (Exception $e) { /* ignore */ }
                 break;
 
             default:
