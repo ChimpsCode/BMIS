@@ -1,5 +1,6 @@
 <?php
 $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
+
 // Prefer session role when available
 if (session_status() === PHP_SESSION_NONE) session_start();
 if (isset($_SESSION['role'])) {
@@ -8,6 +9,8 @@ if (isset($_SESSION['role'])) {
 include '../includes/sidebar.php';
 include '../includes/header.php';
 ?>
+
+
 <main class="main-content container">
     <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
@@ -32,9 +35,9 @@ include '../includes/header.php';
 
             try {
                 if ($role === 'resident' && $current_resident_id) {
-                    // Resident: only show their own complaints
+                    // Resident: only show their own complaints (exclude soft-deleted by admin/staff)
                     $stmt = $pdo->prepare(
-                        'SELECT id AS complaint_id, resident_id, subject, details, status, created_at FROM complaints WHERE resident_id = :rid ORDER BY id DESC'
+                        'SELECT id AS complaint_id, resident_id, subject, details, status, created_at FROM complaints WHERE resident_id = :rid AND (soft_delete = 0 OR soft_delete IS NULL) ORDER BY id DESC'
                     );
                     $stmt->execute([':rid' => $current_resident_id]);
                 } else {
@@ -42,11 +45,11 @@ include '../includes/header.php';
                     // Use LEFT JOIN on residents if present; if not, fallback to resident_id only
                     try {
                         $stmt = $pdo->query(
-                            "SELECT c.id AS complaint_id, c.resident_id, c.subject, c.details, c.status, c.created_at, CONCAT_WS(' ', r.first_name, r.middle_name, r.last_name, r.suffix) AS resident_name FROM complaints c LEFT JOIN tbl_residents r ON c.resident_id = r.resident_id ORDER BY c.id DESC"
+                            "SELECT c.id AS complaint_id, c.resident_id, c.subject, c.details, c.status, c.created_at, CONCAT_WS(' ', r.first_name, r.middle_name, r.last_name, r.suffix) AS resident_name FROM complaints c LEFT JOIN tbl_residents r ON c.resident_id = r.resident_id WHERE (c.soft_delete = 0 OR c.soft_delete IS NULL) ORDER BY c.id DESC"
                         );
                     } catch (Exception $e) {
                         // Fallback: no residents table
-                        $stmt = $pdo->query('SELECT id AS complaint_id, resident_id, subject, details, status, created_at FROM complaints ORDER BY id DESC');
+                        $stmt = $pdo->query('SELECT id AS complaint_id, resident_id, subject, details, status, created_at FROM complaints WHERE (soft_delete = 0 OR soft_delete IS NULL) ORDER BY id DESC');
                     }
                 }
 
@@ -63,7 +66,7 @@ include '../includes/header.php';
                 echo '<div class="complaint-list">';
                 foreach($complaints as $c){
                     ?>
-                    <div class="complaint-card">
+                    <div class="complaint-card" id="complaint-<?php echo (int)$c['complaint_id']; ?>">
                         <div style="display:flex;justify-content:space-between;align-items:start;gap:12px">
                             <div>
                                 <div style="font-weight:700">
@@ -84,15 +87,20 @@ include '../includes/header.php';
                                 <div class="small muted"><?php echo htmlspecialchars($c['subject']); ?> · <?php echo htmlspecialchars(date('Y-m-d', strtotime($c['created_at']))); ?></div>
                             </div>
                             <div class="text-right">
-                                <div class="small muted">Status</div>
-                                <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($c['status']); ?></div>
-                            </div>
+                                    <div class="small muted">Status</div>
+                                    <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($c['status']); ?></div>
+                                </div>
                         </div>
                         <div style="margin-top:8px;color:var(--muted)"><?php echo nl2br(htmlspecialchars($c['details'])); ?></div>
                         <?php if ($role !== 'resident') { ?>
                         <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
                             <a href="#" class="btn ghost">Reply</a>
                             <a href="#" class="btn">Mark Resolved</a>
+                            <button class="btn btn-danger" onclick="softDeleteComplaint(<?php echo (int)$c['complaint_id']; ?>)">Delete</button>
+                        </div>
+                        <?php } else { ?>
+                        <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+                            <button class="btn btn-danger" onclick="residentHideComplaint(<?php echo (int)$c['complaint_id']; ?>)">Delete</button>
                         </div>
                         <?php } ?>
                     </div>
@@ -195,5 +203,47 @@ document.addEventListener('DOMContentLoaded', function(){
             .replace(/"/g,'&quot;')
             .replace(/'/g,'&#39;');
     }
+    // Soft-delete (admin/staff): mark complaint as soft_delete=1 in DB
+    window.softDeleteComplaint = function(complaintId){
+        if (!confirm('Archive this complaint? This will hide it from lists.')) return;
+        fetch('soft_delete_complaint.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'complaint_id=' + encodeURIComponent(complaintId)
+        }).then(r => r.json()).then(res => {
+            if (res.success) {
+                const el = document.getElementById('complaint-' + complaintId);
+                if (el) el.remove();
+            } else {
+                alert('Failed to archive: ' + (res.error || 'Unknown'));
+            }
+        }).catch(e => alert('Error: ' + e.message));
+    }
+
+    // Resident-side hide: store hidden complaint ids in localStorage per resident
+    window.residentHideComplaint = function(complaintId){
+        if (!confirm('Delete this complaint from your view? Admins will still see it.')) return;
+        try{
+            const key = 'hidden_complaints';
+            const raw = localStorage.getItem(key);
+            const arr = raw ? JSON.parse(raw) : [];
+            if (!arr.includes(complaintId)) arr.push(complaintId);
+            localStorage.setItem(key, JSON.stringify(arr));
+            const el = document.getElementById('complaint-' + complaintId);
+            if (el) el.remove();
+        } catch(e){
+            alert('Error hiding complaint: ' + e.message);
+        }
+    }
+
+    // On load, hide complaints previously hidden by resident
+    try{
+        const raw = localStorage.getItem('hidden_complaints');
+        const arr = raw ? JSON.parse(raw) : [];
+        arr.forEach(id => {
+            const el = document.getElementById('complaint-' + id);
+            if (el) el.remove();
+        });
+    } catch(e){ /* ignore */ }
 });
 </script>

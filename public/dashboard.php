@@ -18,7 +18,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
     if (session_status() == PHP_SESSION_NONE) session_start();
     $currentRole = isset($_SESSION['role']) ? $_SESSION['role'] : (isset($role) ? $role : 'resident');
     ?>
-    <?php if ($currentRole === 'admin'): ?>
+    <?php if ($currentRole === 'admin' || $currentRole === 'staff'): ?>
         <div class="card">
             <?php
             include_once __DIR__ . '/../includes/db.php';
@@ -28,21 +28,38 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 $totalResidents = (int)$stmt->fetchColumn();
 
                 // pending requests
-                $stmt = $pdo->prepare("SELECT COUNT(*) FROM tbl_requests WHERE status = :s");
-                $stmt->execute(['s' => 'Pending']);
+                // Consider requests pending when pending_status is empty or explicitly 'pending',
+                // or status indicates pending/processing. This makes the count resilient to
+                // different flows that set pending_status/payment_status/status.
+                $stmt = $pdo->prepare(
+                    "SELECT COUNT(*) FROM tbl_requests WHERE (pending_status IS NULL OR TRIM(pending_status) = '' OR LOWER(pending_status) = 'pending') OR LOWER(status) IN ('pending','processing')"
+                );
+                $stmt->execute();
                 $pendingRequests = (int)$stmt->fetchColumn();
 
                 // complaints
                 $stmt = $pdo->query('SELECT COUNT(*) AS cnt FROM tbl_complaints');
                 $complaints = (int)$stmt->fetchColumn();
 
-                // inquiries (approximate by searching messages for 'inquiry' in subject or content)
-                $stmt = $pdo->prepare("SELECT COUNT(*) FROM tbl_messages WHERE subject LIKE :q OR content LIKE :q");
+                // inquiries (best-effort - search messages for the keyword 'inquiry' in subject or content)
+                $stmt = $pdo->prepare("SELECT COUNT(*) FROM tbl_messages WHERE LOWER(subject) LIKE :q OR LOWER(content) LIKE :q");
                 $q = '%inquiry%';
                 $stmt->execute(['q' => $q]);
                 $inquiries = (int)$stmt->fetchColumn();
             } catch (Exception $e) {
-                $totalResidents = 0; $pendingRequests = 0; $complaints = 0; $inquiries = 0;
+                // If any query fails, keep any counts that were already populated and
+                // default the rest to 0. This prevents a single failing query from
+                // zeroing out all stats and makes debugging easier.
+                $totalResidents = isset($totalResidents) ? $totalResidents : 0;
+                $pendingRequests = isset($pendingRequests) ? $pendingRequests : 0;
+                $complaints = isset($complaints) ? $complaints : 0;
+                $inquiries = isset($inquiries) ? $inquiries : 0;
+
+                // Log the error for debugging (server error log). Remove or change
+                // this in production if you don't want DB errors logged.
+                if (function_exists('error_log')) {
+                    error_log('[dashboard] stats query error: ' . $e->getMessage());
+                }
             }
 
             ?>
