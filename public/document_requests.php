@@ -206,101 +206,66 @@ include '../includes/header.php';
                     }
                 });
 
-                // Handle status updates
-                function updateStatus(requestId) {
-                    const form = document.getElementById('status-form-' + requestId);
-                    if (form) {
-                        form.style.display = 'block';
-                    }
-                }
 
-                function cancelUpdate(requestId) {
-                    const form = document.getElementById('status-form-' + requestId);
-                    if (form) {
-                        form.style.display = 'none';
-                        form.querySelector('form').reset();
-                    }
-                }
-
-                function handleStatusUpdate(event, requestId) {
-                    event.preventDefault();
-                    const form = event.target;
-                    const status = form.querySelector('[name="new_status"]').value;
-                        let reason = '';
-                        const reasonField = form.querySelector('[name="reason"]');
-                    
-                        if (status === 'not granted') {
-                            reason = reasonField ? reasonField.value : '';
-                            if (!reason) {
-                                alert('Please provide a reason for not granting the request.');
-                                return;
-                            }
-                            // Format reason if it doesn't follow the template
-                            if (!reason.toLowerCase().includes('document is not granted')) {
-                                reason = 'Document is not granted (Reason: ' + reason + ')';
-                            }
-                        }
-
+                // New status actions: Pickup, Release, Failed
+                function handlePickup(requestId) {
+                    if (!confirm('Mark this request as picked up (payment received)?')) return;
                     const data = new FormData();
                     data.append('request_id', requestId);
-                    data.append('new_status', status);
-                        if (reason) {
-                        data.append('reason', reason);
-                    }
-
-                    fetch('update_request_status.php', {
-                        method: 'POST',
-                        body: data
-                    })
-                    .then(response => response.json())
-                    .then(result => {
-                        if (result.success) {
-                            window.location.reload();
-                        } else {
-                            alert('Failed to update status: ' + (result.error || 'Unknown error'));
-                        }
-                    })
-                    .catch(error => {
-                        alert('Error updating status: ' + error.message);
-                    });
-                }
-
-                // Mark as ready for pickup
-                function handleReady(requestId) {
-                    if (!confirm('Mark this request as ready for pickup?')) return;
-                    const data = new FormData();
-                    data.append('request_id', requestId);
-                    data.append('new_status', 'ready');
+                    data.append('action', 'pickup');
 
                     fetch('update_request_status.php', { method: 'POST', body: data })
                         .then(r => r.json())
                         .then(res => {
-                            if (res.success) window.location.reload();
-                            else alert('Failed to update: ' + (res.error || 'Unknown'));
+                            if (res.success) {
+                                // update DOM without reload if possible
+                                const card = document.getElementById('request-' + requestId);
+                                if (card) {
+                                    const statusBox = card.querySelector('.status-display');
+                                    if (statusBox) statusBox.innerHTML = '<div class="small" style="color:#059669">Status: Ready for pickup</div><div class="small muted">Payment: Paid</div>';
+                                }
+                            } else alert('Failed to update: ' + (res.error || 'Unknown'));
                         }).catch(e => alert('Error: ' + e.message));
                 }
 
-                // Reject with reason
-                function handleReject(requestId) {
-                    let reason = prompt('Enter rejection reason (e.g. not available):');
-                    if (reason === null) return; // cancelled
-                    reason = reason.trim();
-                    if (!reason) { alert('Reason is required.'); return; }
-                    // format reason
-                    if (!reason.toLowerCase().includes('rejected')) {
-                        reason = 'Rejected (Reason: ' + reason + ')';
-                    }
-
+                function handleRelease(requestId) {
+                    if (!confirm('Mark this request as released to resident?')) return;
                     const data = new FormData();
                     data.append('request_id', requestId);
-                    data.append('new_status', 'rejected');
-                    data.append('reason', reason);
+                    data.append('action', 'release');
 
                     fetch('update_request_status.php', { method: 'POST', body: data })
                         .then(r => r.json())
                         .then(res => {
-                            if (res.success) window.location.reload();
-                            else alert('Failed to update: ' + (res.error || 'Unknown'));
+                            if (res.success) {
+                                const card = document.getElementById('request-' + requestId);
+                                if (card) {
+                                    const statusBox = card.querySelector('.status-display');
+                                    if (statusBox) statusBox.innerHTML = '<div class="small" style="color:#059669">Status: Released</div>';
+                                }
+                            } else alert('Failed to update: ' + (res.error || 'Unknown'));
+                        }).catch(e => alert('Error: ' + e.message));
+                }
+
+                function handleFailed(requestId) {
+                    let reason = prompt('Enter failure reason (optional):');
+                    if (reason === null) return; // cancelled
+                    reason = reason.trim();
+                    const data = new FormData();
+                    data.append('request_id', requestId);
+                    data.append('action', 'failed');
+                    if (reason) data.append('reason', reason);
+
+                    fetch('update_request_status.php', { method: 'POST', body: data })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (res.success) {
+                                const card = document.getElementById('request-' + requestId);
+                                if (card) {
+                                    const statusBox = card.querySelector('.status-display');
+                                    if (statusBox) statusBox.innerHTML = '<div class="small" style="color:#991b1b">Status: Failed</div>';
+                                }
+                            } else alert('Failed to update: ' + (res.error || 'Unknown'));
                         }).catch(e => alert('Error: ' + e.message));
                 }
 
@@ -373,7 +338,7 @@ include '../includes/header.php';
             try {
                 if ($viewerRole === 'admin' || $viewerRole === 'staff') {
                     // admins and staff see all requests
-                    $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id ORDER BY r.date_requested DESC');
+                    $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, r.pending_status, r.release_date, r.payment_status, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id ORDER BY r.date_requested DESC');
                     $stmt->execute();
                 } elseif ($viewerRole === 'resident') {
                     // resident - only show their own requests (limit 20)
@@ -386,8 +351,8 @@ include '../includes/header.php';
                         if ($rr && !empty($rr['resident_id'])) $residentFilter = (int)$rr['resident_id'];
                     }
                     if ($residentFilter) {
-                        // include reason so residents can see denial reasons
-                        $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id WHERE r.resident_id = :rid ORDER BY r.date_requested DESC LIMIT 20');
+                        // include reason/pending_status so residents can see statuses
+                        $stmt = $pdo->prepare('SELECT r.request_id, d.doc_name, r.status, r.date_requested, r.reason, r.pending_status, r.release_date, r.payment_status, rr.first_name, rr.last_name FROM tbl_requests r LEFT JOIN tbl_documents d ON r.doc_id = d.doc_id LEFT JOIN tbl_residents rr ON r.resident_id = rr.resident_id WHERE r.resident_id = :rid ORDER BY r.date_requested DESC LIMIT 20');
                         $stmt->execute(['rid' => $residentFilter]);
                     } else {
                         // no resident mapping available, return empty
@@ -416,23 +381,39 @@ include '../includes/header.php';
                                 <div style="font-weight:700"><?php echo htmlspecialchars(trim($rq['first_name'] . ' ' . $rq['last_name'])); ?></div>
                                 <div class="small muted"><?php echo htmlspecialchars($rq['date_requested']); ?> · <strong><?php echo htmlspecialchars($rq['doc_name']); ?></strong></div>
                                     <div class="status-display" style="margin-top:4px">
-                                        <?php if ($rq['status'] === 'ready'): ?>
-                                            <div class="small" style="color:#059669">Status: Ready for pickup</div>
-                                        <?php elseif ($rq['status'] === 'rejected' && !empty($rq['reason'])): ?>
-                                            <div class="small" style="color:#991b1b">Status: <?php echo htmlspecialchars($rq['reason']); ?></div>
-                                        <?php elseif ($rq['status'] === 'pending'): ?>
-                                            <div class="small" style="color:#d97706">Status: Pending</div>
-                                        <?php endif; ?>
+                                        <?php
+                                        $ps = isset($rq['pending_status']) ? strtolower($rq['pending_status']) : '';
+                                        if ($ps === 'ready for pick up' || $ps === 'ready for pickup' || $ps === 'ready') {
+                                            echo '<div class="small" style="color:#059669">Status: Ready for pickup</div>';
+                                            if (!empty($rq['payment_status'])) {
+                                                echo '<div class="small muted">Payment: ' . htmlspecialchars($rq['payment_status']) . '</div>';
+                                            }
+                                        } elseif ($ps === 'released' || strtolower($rq['status']) === 'completed') {
+                                            $rdate = !empty($rq['release_date']) ? $rq['release_date'] : '';
+                                            echo '<div class="small" style="color:#059669">Status: Released' . ($rdate ? ' on ' . htmlspecialchars($rdate) : '') . '</div>';
+                                        } elseif ($ps === 'failed' || strtolower($rq['status']) === 'failed') {
+                                            echo '<div class="small" style="color:#991b1b">Status: Failed</div>';
+                                        } else {
+                                            // fallback to status/reason
+                                            if (!empty($rq['reason'])) {
+                                                echo '<div class="small" style="color:#991b1b">Status: ' . htmlspecialchars($rq['reason']) . '</div>';
+                                            } else {
+                                                echo '<div class="small" style="color:#d97706">Status: ' . htmlspecialchars($rq['status']) . '</div>';
+                                            }
+                                        }
+                                        ?>
                                     </div>
                             </div>
                             <div class="text-right">
                                 <div class="small muted">Status</div>
                                 <div style="font-weight:700;color:var(--accent)"><?php echo htmlspecialchars($rq['status']); ?></div>
                                 <?php if ($viewerRole === 'admin' || $viewerRole === 'staff'): ?>
-                                    <div style="margin-top:8px;display:flex;gap:4px;">
-                                        <button class="btn btn-small" onclick="updateStatus(<?php echo (int)$rq['request_id']; ?>)">Update Status</button>
-                                        <button class="btn btn-small btn-danger" onclick="deleteRequest(<?php echo (int)$rq['request_id']; ?>)">Delete</button>
-                                    </div>
+                                <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end;">
+                                    <button class="btn btn-small" onclick="handlePickup(<?php echo (int)$rq['request_id']; ?>)">Pick Up</button>
+                                    <button class="btn btn-small" onclick="handleRelease(<?php echo (int)$rq['request_id']; ?>)">Released</button>
+                                    <button class="btn btn-small btn-warning" onclick="handleFailed(<?php echo (int)$rq['request_id']; ?>)">Failed</button>
+                                    <button class="btn btn-small btn-danger" onclick="deleteRequest(<?php echo (int)$rq['request_id']; ?>)">Delete</button>
+                                </div>
                                 <?php endif; ?>
                             </div>
                         </div>
