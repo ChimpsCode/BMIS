@@ -72,21 +72,49 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
             <div class="stats-box">
                 <div class="stat-item">
                     <div class="label">Total Residents</div>
-                    <div class="value"><?php echo number_format($totalResidents); ?></div>
+                    <div class="value" id="totalResidents"><?php echo number_format($totalResidents); ?></div>
                 </div>
                 <div class="stat-item">
                     <div class="label">Pending Requests</div>
-                    <div class="value"><?php echo number_format($pendingRequests); ?></div>
+                    <div class="value" id="pendingRequests"><?php echo number_format($pendingRequests); ?></div>
                 </div>
                 <div class="stat-item">
                     <div class="label">Complaints</div>
-                    <div class="value"><?php echo number_format($complaints); ?></div>
+                    <div class="value" id="complaints"><?php echo number_format($complaints); ?></div>
                 </div>
                 <div class="stat-item">
                     <div class="label">Inquiries</div>
-                    <div class="value"><?php echo number_format($inquiries); ?></div>
+                    <div class="value" id="inquiries"><?php echo number_format($inquiries); ?></div>
                 </div>
             </div>
+            
+            <script>
+            // Function to update dashboard stats
+            function updateDashboardStats() {
+                fetch('get_dashboard_stats.php')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            const stats = data.stats;
+                            document.getElementById('totalResidents').textContent = new Intl.NumberFormat().format(stats.totalResidents);
+                            document.getElementById('pendingRequests').textContent = new Intl.NumberFormat().format(stats.pendingRequests);
+                            document.getElementById('complaints').textContent = new Intl.NumberFormat().format(stats.complaints);
+                            document.getElementById('inquiries').textContent = new Intl.NumberFormat().format(stats.inquiries);
+                        }
+                    })
+                    .catch(console.error);
+            }
+
+            // Update stats when page loads
+            document.addEventListener('DOMContentLoaded', updateDashboardStats);
+
+            // Create a custom event for updating stats
+            const dashboardStatsEvent = new Event('updateDashboardStats');
+            document.addEventListener('updateDashboardStats', updateDashboardStats);
+
+            // Update stats every 30 seconds
+            setInterval(updateDashboardStats, 30000);
+            </script>
             <div>
                 <h3>Quick Access</h3>
                 <div class="quick-grid">
@@ -113,11 +141,11 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 <h3 style="margin:0">Recent Admin/Staff Logs</h3>
                 <?php if (in_array($_SESSION['role'], ['admin', 'staff'])): ?>
                 <div style="display:flex;gap:8px;align-items:center">
-                    <label style="display:flex;align-items:center;gap:4px">
-                        <input type="checkbox" id="selectAllLogs"> Select All
+                    <label class="btn ghost" style="margin:0;cursor:pointer">
+                        <input type="checkbox" id="selectAllLogs" style="margin-right:4px"> Select All
                     </label>
-                    <button id="deleteSelectedLogs" class="btn danger" style="display:none">Delete Selected</button>
-                    <button id="deleteAllLogs" class="btn danger ghost">Delete All</button>
+                    <button id="deleteSelectedLogs" class="btn danger" style="display:none;margin:0">Delete Selected</button>
+                    <button id="deleteAllLogs" class="btn danger ghost" style="margin:0">Delete All</button>
                 </div>
                 <?php endif; ?>
             </div>
@@ -157,7 +185,9 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 if (selectAll) {
                     selectAll.addEventListener('change', function() {
                         checkboxes.forEach(cb => cb.checked = this.checked);
-                        deleteSelected.style.display = this.checked ? 'block' : 'none';
+                        if (deleteSelected) {
+                            deleteSelected.style.display = this.checked ? 'inline-block' : 'none';
+                        }
                     });
                 }
                 
@@ -165,7 +195,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 document.getElementById('logsList')?.addEventListener('change', function(e) {
                     if (e.target.classList.contains('logCheckbox')) {
                         const anyChecked = [...checkboxes].some(cb => cb.checked);
-                        deleteSelected.style.display = anyChecked ? 'block' : 'none';
+                        deleteSelected.style.display = anyChecked ? 'inline-block' : 'none';
                         
                         // Update select all checkbox
                         const allChecked = [...checkboxes].every(cb => cb.checked);
@@ -174,11 +204,17 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 });
                 
                 // Delete selected logs
-                deleteSelected?.addEventListener('click', function() {
+                deleteSelectedLogs?.addEventListener('click', function() {
                     if (!confirm('Are you sure you want to delete the selected logs?')) return;
                     
                     const selectedIds = [...checkboxes].filter(cb => cb.checked).map(cb => cb.value);
                     if (selectedIds.length === 0) return;
+                    
+                    console.log('Deleting log IDs:', selectedIds); // Debug log
+                    
+                    // Disable the delete button while processing
+                    deleteSelectedLogs.disabled = true;
+                    deleteSelectedLogs.textContent = 'Deleting...';
                     
                     const formData = new FormData();
                     formData.append('log_ids', JSON.stringify(selectedIds));
@@ -189,13 +225,47 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                     })
                     .then(r => r.json())
                     .then(data => {
+                        console.log('Server response:', data); // Debug log
                         if (data.success) {
-                            location.reload();
+                            // Remove the deleted items from the DOM
+                            selectedIds.forEach(id => {
+                                const checkbox = document.querySelector(`.logCheckbox[value="${id}"]`);
+                                if (checkbox) {
+                                    const listItem = checkbox.closest('li');
+                                    if (listItem) {
+                                        listItem.remove();
+                                    }
+                                }
+                            });
+                            
+                            // Show success message
+                            alert('Logs deleted successfully');
+                            
+                            // If no items left, show the "No logs" message
+                            const remainingLogs = document.querySelectorAll('.logCheckbox');
+                            if (remainingLogs.length === 0) {
+                                const logsList = document.getElementById('logsList');
+                                if (logsList) {
+                                    logsList.innerHTML = '<div class="muted">No recent admin/staff logs.</div>';
+                                }
+                            }
+                            
+                            // Reset the delete button
+                            deleteSelectedLogs.style.display = 'none';
+                            if (selectAll) selectAll.checked = false;
                         } else {
-                            alert('Error: ' + data.message);
+                            throw new Error(data.message);
                         }
                     })
-                    .catch(err => alert('Error: ' + err.message));
+                    .catch(err => {
+                        console.error('Error:', err); // Debug log
+                        alert('Error: ' + err.message);
+                    })
+                    .finally(() => {
+                        // Re-enable the delete button
+                        deleteSelectedLogs.disabled = false;
+                        deleteSelectedLogs.textContent = 'Delete Selected';
+                    });
                 });
                 
                 // Delete all logs
@@ -212,7 +282,16 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                     .then(r => r.json())
                     .then(data => {
                         if (data.success) {
-                            location.reload();
+                            // Update stats instead of full reload
+                            document.dispatchEvent(new Event('updateDashboardStats'));
+                            // Remove deleted items from view
+                            selectedIds.forEach(id => {
+                                const element = document.querySelector(`[data-id="${id}"]`);
+                                if (element) {
+                                    const listItem = element.closest('li');
+                                    if (listItem) listItem.remove();
+                                }
+                            });
                         } else {
                             alert('Error: ' + data.message);
                         }
@@ -248,9 +327,18 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
         </div>
 
         <div class="card">
-        <h2>Activity Logs</h2>
-        <p class="muted">Track all your activities including document requests, complaints, and feedback.</p>
-        <div style="margin-top:12px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <h3 style="margin:0">Activity Logs</h3>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <label class="btn ghost" style="margin:0;cursor:pointer">
+                        <input type="checkbox" id="selectAllActivities" style="margin-right:4px"> Select All
+                    </label>
+                    <button id="deleteSelectedActivities" class="btn danger" style="display:none;margin:0">Delete Selected</button>
+                    <button id="deleteAllActivities" class="btn danger ghost" style="margin:0">Delete All</button>
+                </div>
+            </div>
+            <p class="muted" style="margin:0 0 12px 0">Track all your activities including document requests, complaints, and feedback.</p>
+            <div style="margin-top:12px">
             <?php
             try {
                 // Check if we have a valid resident ID from session
@@ -301,7 +389,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                     if (empty($activities)) {
                         echo '<div class="muted" style="text-align:center;padding:20px">No activities found.</div>';
                     } else {
-                        echo '<div class="activity-log" style="max-height:500px;overflow-y:auto">';
+                        echo '<div class="activity-log" style="max-height:500px;overflow-y:auto"><ul id="activitiesList" style="list-style:none;padding:0;margin:0">';
                         foreach ($activities as $activity) {
                             $icon = $activity['type'] === 'document' ? '📄' : '💬';
                             $status = isset($activity['pending_status']) && !empty($activity['pending_status']) 
@@ -324,6 +412,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                             $itemId = $activity['type'] === 'document' ? 'request-' . $activity['id'] : 'complaint-' . $activity['id'];
                             
                             echo '<div class="activity-item" id="' . $itemId . '" style="padding:12px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:start">';
+                            echo '<input type="checkbox" class="activityCheckbox" data-id="' . $activity['id'] . '" data-type="' . $activity['type'] . '" style="margin-top:4px">';
                             echo '<div style="font-size:1.5rem">' . $icon . '</div>';
                             echo '<div style="flex:1">';
                             echo '<div style="display:flex;justify-content:space-between;align-items:start;gap:8px">';
@@ -368,7 +457,7 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                             echo '</div>';
                             echo '</div>';
                         }
-                        echo '</div>';
+                        echo '</ul></div>';
                     }
                 } else {
                     echo '<div class="muted" style="text-align:center;padding:20px">Please log in to view your document requests.</div>';
@@ -448,6 +537,90 @@ function adminDeleteRequest(requestId) {
             alert('Unable to delete: ' + (res && res.error ? res.error : 'Unknown'));
         }
     }).catch(e => alert('Error: ' + e.message));
+}
+
+// Handle bulk activity deletions for residents
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAll = document.getElementById('selectAllActivities');
+    const deleteSelected = document.getElementById('deleteSelectedActivities');
+    const deleteAll = document.getElementById('deleteAllActivities');
+    const checkboxes = document.querySelectorAll('.activityCheckbox');
+    
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            checkboxes.forEach(cb => cb.checked = this.checked);
+            if (deleteSelected) {
+                deleteSelected.style.display = this.checked ? 'inline-block' : 'none';
+            }
+        });
+    }
+    
+    // Show/hide Delete Selected button based on checkbox state
+    document.querySelector('.activity-log')?.addEventListener('change', function(e) {
+        if (e.target.classList.contains('activityCheckbox')) {
+            const anyChecked = [...checkboxes].some(cb => cb.checked);
+            if (deleteSelected) {
+                deleteSelected.style.display = anyChecked ? 'inline-block' : 'none';
+            
+            // Update select all checkbox
+            const allChecked = [...checkboxes].every(cb => cb.checked);
+            if (selectAll) selectAll.checked = allChecked;
+        }
+    });
+    
+    // Delete selected activities
+    deleteSelected?.addEventListener('click', function() {
+        if (!confirm('Are you sure you want to delete the selected activities? This cannot be undone.')) return;
+        
+        const selectedActivities = [...checkboxes]
+            .filter(cb => cb.checked)
+            .map(cb => ({
+                id: cb.getAttribute('data-id'),
+                type: cb.getAttribute('data-type')
+            }));
+        
+        if (selectedActivities.length === 0) return;
+        
+        const formData = new FormData();
+        formData.append('activities', JSON.stringify(selectedActivities));
+        
+        fetch('delete_resident_activities.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    });
+    
+    // Delete all activities
+    deleteAll?.addEventListener('click', function() {
+        if (!confirm('Are you sure you want to delete ALL your activities? This cannot be undone.')) return;
+        
+        const formData = new FormData();
+        formData.append('delete_all', 'true');
+        
+        fetch('delete_resident_activities.php', {
+            method: 'POST',
+            body: formData
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(err => alert('Error: ' + err.message));
+    });
+});
 }
 </script>
 

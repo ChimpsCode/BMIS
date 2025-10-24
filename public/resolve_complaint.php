@@ -14,9 +14,29 @@ try {
         echo json_encode(['success' => false, 'error' => 'Permission denied']);
         exit;
     }
+    // Start transaction to ensure both update and log are saved
+    $pdo->beginTransaction();
+
+    // Get complaint details first for logging
+    $getDetails = $pdo->prepare('SELECT subject, type FROM complaints WHERE id = :id');
+    $getDetails->execute(['id' => $cid]);
+    $complaint = $getDetails->fetch(PDO::FETCH_ASSOC);
+    
+    // Update complaint status
     $upd = $pdo->prepare('UPDATE complaints SET status = :st, resolved_at = NOW() WHERE id = :id');
     $upd->execute(['st' => 'resolved', 'id' => $cid]);
+    
+    // Add log entry for admin/staff action
+    $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :type)');
+    $logStmt->execute([
+        ':uid' => $_SESSION['user_id'],
+        ':act' => 'Resolved ' . ($complaint['type'] ?? 'complaint') . ': ' . ($complaint['subject'] ?? 'ID #' . $cid),
+        ':type' => 'resolve'
+    ]);
 
+    // Commit transaction
+    $pdo->commit();
+    
     // notify resident via tbl_inquiries if possible
     try {
         try {
@@ -37,8 +57,19 @@ try {
         }
     } catch (Exception $e) { /* ignore notify errors */ }
 
-    echo json_encode(['success' => true]);
+    echo json_encode([
+        'success' => true,
+        'message' => 'Complaint resolved successfully',
+        'updateStats' => true // Signal frontend to update stats
+    ]);
 } catch (Exception $e) {
-    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    // Rollback transaction if there was an error
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    echo json_encode([
+        'success' => false, 
+        'error' => $e->getMessage()
+    ]);
 }
 exit;

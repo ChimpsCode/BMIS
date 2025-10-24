@@ -5,7 +5,8 @@ require_once __DIR__ . '/../includes/db.php';
 function ensure_user_columns($pdo) {
     $cols = [
         'username' => "VARCHAR(100) UNIQUE NULL",
-        'password_hash' => "VARCHAR(255) NULL"
+        'password_hash' => "VARCHAR(255) NULL",
+        'last_login' => "DATETIME NULL"
     ];
     foreach ($cols as $name => $type) {
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tbl_users' AND COLUMN_NAME = :col");
@@ -48,13 +49,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Now verify password
-    if (password_verify($password, $user['password_hash'])) {
-        $_SESSION['user_id'] = (int)$user['user_id'];
-        $_SESSION['role'] = $user['role'];
-        if (!empty($user['resident_id'])) $_SESSION['resident_id'] = (int)$user['resident_id'];
+        if (password_verify($password, $user['password_hash'])) {
+            // Update last_login timestamp
+            $updateLogin = $pdo->prepare("UPDATE tbl_users SET last_login = CURRENT_TIMESTAMP WHERE user_id = :id");
+            $updateLogin->execute(['id' => $user['user_id']]);
+            
+            $_SESSION['user_id'] = (int)$user['user_id'];
+            $_SESSION['role'] = $user['role'];
+            if (!empty($user['resident_id'])) $_SESSION['resident_id'] = (int)$user['resident_id'];
 
-        header('Location: dashboard.php');
-        exit;
+            header('Location: dashboard.php');
+            exit;
     } else {
         $errors[] = 'Invalid username or password.';
     }

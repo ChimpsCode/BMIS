@@ -16,14 +16,13 @@ $currentRole = isset($_SESSION['role']) ? $_SESSION['role'] : null;
     </div>
     <div class="actions">
         <?php if ($currentRole): ?>
-            <div class="notif">
-                <button class="notif-btn" title="Notifications">
+            <div class="notif" style="margin-left: auto; display: flex; align-items: center; gap: 8px;">
+                <button class="notif-btn" title="Notifications" style="margin-right: 8px;">
                     🔔
                     <span class="badge">3</span>
                 </button>
-                <div class="small muted">Logged in as <strong class="notif-user"><?php echo htmlspecialchars(ucfirst($currentRole)); ?></strong></div>
+                <div class="small muted" style="white-space: nowrap;">Logged in as <strong class="notif-user"><?php echo htmlspecialchars(ucfirst($currentRole)); ?></strong></div>
             </div>
-            <a href="../public/logout.php" class="btn ghost">Logout</a>
         <?php else: ?>
             <a href="../public/login.php" class="btn">Login</a>
         <?php endif; ?>

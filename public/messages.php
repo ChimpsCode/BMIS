@@ -26,7 +26,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
         $resident_id = isset($_SESSION['resident_id']) ? (int)$_SESSION['resident_id'] : null;
 
         // We'll record intended recipient role in the subject as a lightweight tag when receiver_id is not specified
-        $subWithTo = ($to ? '[to:' . $to . '] ' : '') . $subject;
+        $subWithTo = ($to ? '[to:' . $to . '] ' : '') . ($subject ? $subject : 'Inquiry');
+        
+        // Start transaction
+        $pdo->beginTransaction();
+
+        try {
+            // Insert the message
+            $stmt = $pdo->prepare('INSERT INTO tbl_messages (sender_id, resident_id, subject, content, date_sent, status) VALUES (:sid, :rid, :sub, :msg, NOW(), :st)');
+            $stmt->execute([
+                ':sid' => $sender_id,
+                ':rid' => $resident_id,
+                ':sub' => $subWithTo,
+                ':msg' => $messageBody,
+                ':st' => 'unread'
+            ]);
+
+            // Add a log entry if message is from resident to admin/staff
+            if ($senderRole === 'resident' && ($to === 'admin' || $to === 'staff' || $to === 'Barangay Kauswagan')) {
+                $logStmt = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :type)');
+                $logStmt->execute([
+                    ':uid' => $sender_id ?? 0,
+                    ':act' => 'New inquiry received: ' . substr($subject ?: 'General Inquiry', 0, 50),
+                    ':type' => 'inquiry'
+                ]);
+            }
+
+            $pdo->commit();
+
+            // Return success with flag to update dashboard stats
+            $response = [
+                'success' => true,
+                'message' => 'Message sent successfully',
+                'updateStats' => true
+            ];
+        } catch (Exception $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
 
         $stmt = $pdo->prepare('INSERT INTO tbl_messages (sender_id, receiver_id, subject, content, date_sent, status) VALUES (:sid, :rid, :sub, :content, NOW(), :st)');
         $stmt->execute([

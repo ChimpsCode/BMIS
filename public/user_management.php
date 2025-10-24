@@ -41,6 +41,48 @@ $users = $pdo->query("SELECT user_id, username, role, account_status, last_login
     <meta charset="utf-8">
     <title>User Management - Barangay System</title>
     <link rel="stylesheet" href="../assets/css/style.css">
+    <script>
+    function timeAgo(date) {
+        const seconds = Math.floor((new Date() - new Date(date)) / 1000);
+        
+        let interval = seconds / 31536000; // years
+        if (interval > 1) return Math.floor(interval) + " years ago";
+        
+        interval = seconds / 2592000; // months
+        if (interval > 1) return Math.floor(interval) + " months ago";
+        
+        interval = seconds / 86400; // days
+        if (interval > 1) return Math.floor(interval) + " days ago";
+        
+        interval = seconds / 3600; // hours
+        if (interval > 1) return Math.floor(interval) + " hours ago";
+        
+        interval = seconds / 60; // minutes
+        if (interval > 1) return Math.floor(interval) + " minutes ago";
+        
+        if (seconds < 10) return "just now";
+        
+        return Math.floor(seconds) + " seconds ago";
+    }
+
+    // Update all timestamps every minute
+    document.addEventListener('DOMContentLoaded', function() {
+        const timestamps = document.querySelectorAll('.timeago');
+        
+        function updateTimestamps() {
+            timestamps.forEach(el => {
+                const date = el.getAttribute('data-date');
+                if (date) {
+                    el.textContent = timeAgo(date);
+                    el.title = new Date(date).toLocaleString(); // Show exact time on hover
+                }
+            });
+        }
+
+        updateTimestamps();
+        setInterval(updateTimestamps, 60000); // Update every minute
+    });
+    </script>
 </head>
 <body>
 <?php include '../includes/sidebar.php'; ?>
@@ -107,7 +149,15 @@ $users = $pdo->query("SELECT user_id, username, role, account_status, last_login
                             <td><?php echo htmlspecialchars($u['username']); ?></td>
                             <td><?php echo htmlspecialchars(ucfirst($u['role'])); ?></td>
                             <td><?php echo htmlspecialchars($u['account_status']); ?></td>
-                            <td><?php echo htmlspecialchars($u['last_login'] ?? '-'); ?></td>
+                            <td>
+                                <?php if ($u['last_login']): ?>
+                                    <span class="timeago" data-date="<?php echo htmlspecialchars($u['last_login']); ?>">
+                                        <?php echo htmlspecialchars($u['last_login']); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="muted">Never</span>
+                                <?php endif; ?>
+                            </td>
                             <!-- <td><?php echo htmlspecialchars($u['created_at'] ?? '-'); ?></td> -->
                             <td>
                                 <?php if ($u['role'] !== 'admin'): ?>

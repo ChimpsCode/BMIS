@@ -1,1 +1,20 @@
-[]
+[
+    {
+        "id": "msg_68fb71fab3b0a",
+        "from": "Resident",
+        "from_role": "resident",
+        "to": "staff",
+        "subject": "asdasdas",
+        "message": "dasdasd",
+        "created_at": "2025-10-24 14:32:58"
+    },
+    {
+        "id": "msg_68fb72b910c4f",
+        "from": "Resident",
+        "from_role": "resident",
+        "to": "admin",
+        "subject": "asdasd",
+        "message": "adsdsa",
+        "created_at": "2025-10-24 14:36:09"
+    }
+]
