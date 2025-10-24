@@ -5,6 +5,10 @@ require_once __DIR__ . '/../includes/session.php';
 
 if (session_status() == PHP_SESSION_NONE) session_start();
 
+
+
+
+
 // Only allow residents to cancel their own pending requests
 if (!isset($_SESSION['resident_id'])) {
     http_response_code(403);
@@ -20,6 +24,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['request_id'])) {
 
 $request_id = (int)$_POST['request_id'];
 $resident_id = (int)$_SESSION['resident_id'];
+
+
+
+
 
 try {
     // Verify ownership and current status
@@ -41,6 +49,11 @@ try {
         echo json_encode(['error' => 'Cannot delete request at this stage. You may delete requests only after they are released/completed.']);
         exit;
     }
+
+
+
+
+
 
     // Perform deletion of the request (resident-initiated removal)
     try {
