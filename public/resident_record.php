@@ -35,6 +35,54 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
                 // Include database connection
                 include_once __DIR__ . '/../includes/db.php';
 
+                // Detect schema features (optional columns)
+                $hasResidentContact = false;
+                $hasCreatedAt = false;
+                $hasSoftDelete = false;
+                try {
+                    $c = $pdo->query("SHOW COLUMNS FROM tbl_residents LIKE 'contact_no'")->fetch();
+                    if ($c) $hasResidentContact = true;
+                } catch (Exception $e) { /* ignore */ }
+                try {
+                    $c2 = $pdo->query("SHOW COLUMNS FROM tbl_residents LIKE 'created_at'")->fetch();
+                    if ($c2) $hasCreatedAt = true;
+                } catch (Exception $e) { /* ignore */ }
+                try {
+                    $c3 = $pdo->query("SHOW COLUMNS FROM tbl_residents LIKE 'soft_delete'")->fetch();
+                    if ($c3) $hasSoftDelete = true;
+                } catch (Exception $e) { /* ignore */ }
+
+                // Handle inline updates from admin/staff (update contact/status)
+                if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_id'])) {
+                    $updId = (int)$_POST['update_id'];
+                    $newContact = isset($_POST['contact']) ? trim($_POST['contact']) : null;
+                    $newStatus = isset($_POST['account_status']) ? trim($_POST['account_status']) : null;
+                    try {
+                        if ($newContact !== null) {
+                            if ($hasResidentContact) {
+                                $u = $pdo->prepare('UPDATE tbl_residents SET contact_no = :c WHERE resident_id = :id');
+                                $u->execute(['c' => $newContact, 'id' => $updId]);
+                            } else {
+                                // fallback: update household contact if resident belongs to one
+                                $hstmt = $pdo->prepare('SELECT household_id FROM tbl_residents WHERE resident_id = :id LIMIT 1');
+                                $hstmt->execute(['id' => $updId]);
+                                $hh = $hstmt->fetch();
+                                if ($hh && !empty($hh['household_id'])) {
+                                    $pdo->prepare('UPDATE tbl_households SET contact_no = :c WHERE household_id = :hid')->execute(['c' => $newContact, 'hid' => $hh['household_id']]);
+                                }
+                            }
+                        }
+                        if ($newStatus !== null) {
+                            // update tbl_users account_status when a user exists for this resident
+                            $ust = $pdo->prepare('UPDATE tbl_users SET account_status = :s WHERE resident_id = :rid');
+                            $ust->execute(['s' => $newStatus, 'rid' => $updId]);
+                        }
+                        echo '<div class="card success">Resident updated.</div>';
+                    } catch (Exception $e) {
+                        echo '<div class="card error">Unable to update resident: ' . htmlspecialchars($e->getMessage()) . '</div>';
+                    }
+                }
+
                 /* ------------------------
                  * DELETE RESIDENT
                  * ------------------------
@@ -43,10 +91,32 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
                     $delId = (int)$_POST['delete_id'];
 
                     try {
-                        $stmt = $pdo->prepare('DELETE FROM tbl_residents WHERE resident_id = :id');
-                        $stmt->execute(['id' => $delId]);
+                        // Prefer soft-delete to avoid FK constraint errors and preserve audit/history.
+                        if ($hasSoftDelete) {
+                            $stmt = $pdo->prepare('UPDATE tbl_residents SET soft_delete = 1 WHERE resident_id = :id');
+                            $stmt->execute(['id' => $delId]);
+                        } else {
+                            // Try to add the soft_delete column (non-destructive). If that fails, fall back to attempting a hard delete.
+                            try {
+                                $pdo->exec("ALTER TABLE tbl_residents ADD COLUMN soft_delete TINYINT(1) NOT NULL DEFAULT 0");
+                                $hasSoftDelete = true;
+                                $stmt = $pdo->prepare('UPDATE tbl_residents SET soft_delete = 1 WHERE resident_id = :id');
+                                $stmt->execute(['id' => $delId]);
+                            } catch (Exception $inner) {
+                                // Could not add column (permissions?), fallback to application-level check: prevent deletion if dependent rows exist
+                                $chk = $pdo->prepare('SELECT COUNT(*) FROM complaints WHERE resident_id = :id');
+                                $chk->execute(['id' => $delId]);
+                                $cnt = (int)$chk->fetchColumn();
+                                if ($cnt > 0) {
+                                    throw new Exception("There are {$cnt} complaint(s) referencing this resident. Delete or reassign them first.");
+                                }
+                                // No dependent complaints found, attempt hard delete
+                                $stmt = $pdo->prepare('DELETE FROM tbl_residents WHERE resident_id = :id');
+                                $stmt->execute(['id' => $delId]);
+                            }
+                        }
 
-                        echo '<div class="card success">Resident deleted successfully.</div>';
+                        echo '<div class="card success">Resident deleted (soft-deleted if supported) successfully.</div>';
                     } catch (Exception $e) {
                         echo '<div class="card error">Unable to delete resident: ' . htmlspecialchars($e->getMessage()) . '</div>';
                     }
@@ -125,19 +195,29 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
                     $perPage = 5;
                     $page = max(1, (int)($_GET['page'] ?? 1));
 
-                    $stmt = $pdo->query('SELECT COUNT(*) FROM tbl_residents');
+                    // Exclude soft-deleted rows from listing when supported
+                    $whereClause = '';
+                    if ($hasSoftDelete) {
+                        $whereClause = 'WHERE r.soft_delete = 0';
+                    }
+
+                    $countSql = 'SELECT COUNT(*) FROM tbl_residents r ' . $whereClause;
+                    $stmt = $pdo->query($countSql);
                     $total = (int)$stmt->fetchColumn();
 
                     $totalPages = max(1, ceil($total / $perPage));
                     $page = min($page, $totalPages);
                     $start = ($page - 1) * $perPage;
 
-                    $stmt = $pdo->prepare('
-                        SELECT resident_id, first_name, last_name, address 
-                        FROM tbl_residents 
-                        ORDER BY last_name, first_name 
-                        LIMIT :start, :per
-                    ');
+                    // Build select list dynamically depending on available columns
+                    $selectCols = 'r.resident_id, r.first_name, r.last_name, r.address, r.household_id';
+                    if ($hasResidentContact) $selectCols .= ', r.contact_no';
+                    $selectCols .= ', u.account_status, u.last_login';
+                    if ($hasCreatedAt) $selectCols .= ', r.created_at';
+
+                    $stmt = $pdo->prepare(
+                        'SELECT ' . $selectCols . ' , h.contact_no AS household_contact FROM tbl_residents r LEFT JOIN tbl_households h ON r.household_id = h.household_id LEFT JOIN tbl_users u ON u.resident_id = r.resident_id ' . $whereClause . ' ORDER BY r.last_name, r.first_name LIMIT :start, :per'
+                    );
                     $stmt->bindValue(':start', $start, PDO::PARAM_INT);
                     $stmt->bindValue(':per', $perPage, PDO::PARAM_INT);
                     $stmt->execute();
@@ -304,18 +384,24 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($rows as $r): ?>
-                                <tr>
+                            <?php foreach ($rows as $r): 
+                                $contact = '-';
+                                if (!empty($r['contact_no'])) $contact = htmlspecialchars($r['contact_no']);
+                                elseif (!empty($r['household_contact'])) $contact = htmlspecialchars($r['household_contact']);
+                                $status = !empty($r['account_status']) ? htmlspecialchars($r['account_status']) : '-';
+                                $lastLogin = !empty($r['last_login']) ? htmlspecialchars($r['last_login']) : '-';
+                                $created = !empty($r['created_at']) ? htmlspecialchars($r['created_at']) : '-';
+                            ?>
+                                <tr id="resident-row-<?= (int)$r['resident_id'] ?>">
                                     <td><?= htmlspecialchars($r['first_name'] . ' ' . $r['last_name']) ?></td>
-                                    <td class="small muted">-</td>
-                                    <td class="small muted">-</td>
-                                    <td class="small muted">-</td>
-                                    <td class="small muted">-</td>
+                                    <td class="small muted contact-cell"><?= $contact ?></td>
+                                    <td class="small muted status-cell"><?= $status ?></td>
+                                    <td class="small muted"><?= $lastLogin ?></td>
+                                    <td class="small muted"><?= $created ?></td>
                                     <td>
-                                        <form method="post" style="display:inline;"
-                                              onsubmit="return confirm('Delete this resident?')">
-                                            <input type="hidden" name="delete_id"
-                                                   value="<?= (int)$r['resident_id']; ?>">
+                                        <button class="btn" type="button" onclick="editResident(<?= (int)$r['resident_id'] ?>, <?= json_encode($contact) ?>, <?= json_encode($status) ?>)">Edit</button>
+                                        <form method="post" style="display:inline;" onsubmit="return confirm('Delete this resident?')">
+                                            <input type="hidden" name="delete_id" value="<?= (int)$r['resident_id']; ?>">
                                             <button class="btn ghost" type="submit">Delete</button>
                                         </form>
                                     </td>
@@ -369,6 +455,26 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident';
                             });
                         }
                     })();
+                    // Edit resident helper
+                    function editResident(id, currentContact, currentStatus) {
+                        // prompt for contact and status (simple flow)
+                        var contact = prompt('Contact number:', currentContact && currentContact !== '-' ? currentContact : '');
+                        if (contact === null) return; // cancelled
+                        var status = prompt('Account status (Active/Inactive):', currentStatus && currentStatus !== '-' ? currentStatus : 'Active');
+                        if (status === null) return;
+
+                        var fd = new FormData();
+                        fd.append('update_id', id);
+                        fd.append('contact', contact);
+                        fd.append('account_status', status);
+
+                        fetch(window.location.pathname + window.location.search, { method: 'POST', body: fd })
+                            .then(r => r.text())
+                            .then(html => {
+                                // simple approach: reload the page to reflect changes
+                                window.location.reload();
+                            }).catch(err => alert('Error updating resident: ' + err.message));
+                    }
                 </script>
             </div>
         </div>

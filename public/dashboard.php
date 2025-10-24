@@ -109,7 +109,18 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
             </div>
         </div>
         <div class="card" style="margin-top:12px">
-            <h3>Recent Admin/Staff Logs</h3>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <h3 style="margin:0">Recent Admin/Staff Logs</h3>
+                <?php if (in_array($_SESSION['role'], ['admin', 'staff'])): ?>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <label style="display:flex;align-items:center;gap:4px">
+                        <input type="checkbox" id="selectAllLogs"> Select All
+                    </label>
+                    <button id="deleteSelectedLogs" class="btn danger" style="display:none">Delete Selected</button>
+                    <button id="deleteAllLogs" class="btn danger ghost">Delete All</button>
+                </div>
+                <?php endif; ?>
+            </div>
             <?php
             try {
                 $logStmt = $pdo->prepare('SELECT l.log_id, l.user_id, l.activity, l.timestamp, l.action_type, u.username FROM tbl_logs l LEFT JOIN tbl_users u ON l.user_id = u.user_id WHERE u.role IN (\'admin\', \'staff\') ORDER BY l.timestamp DESC LIMIT 20');
@@ -118,12 +129,16 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 if (empty($logs)) {
                     echo '<div class="muted">No recent admin/staff logs.</div>';
                 } else {
-                    echo '<ul style="list-style:none;padding:0;margin:0">';
+                    echo '<ul id="logsList" style="list-style:none;padding:0;margin:0">';
                     foreach ($logs as $lg) {
                         $who = $lg['username'] ? htmlspecialchars($lg['username']) : ('User #' . (int)$lg['user_id']);
                         $ts = htmlspecialchars(date('Y-m-d H:i', strtotime($lg['timestamp'])));
                         $atype = $lg['action_type'] ? htmlspecialchars($lg['action_type']) : '';
-                        echo '<li style="padding:8px 0;border-bottom:1px solid var(--border)"><strong>' . $who . '</strong> — ' . htmlspecialchars($lg['activity']) . ' <span class="muted">' . $ts . ($atype ? ' · ' . $atype : '') . '</span></li>';
+                        echo '<li style="padding:8px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:flex-start">' .
+                             (in_array($_SESSION['role'], ['admin', 'staff']) ? 
+                             '<input type="checkbox" class="logCheckbox" value="' . $lg['log_id'] . '" style="margin-top:4px">' : '') .
+                             '<div style="flex:1"><strong>' . $who . '</strong> — ' . htmlspecialchars($lg['activity']) . 
+                             ' <span class="muted">' . $ts . ($atype ? ' · ' . $atype : '') . '</span></div></li>';
                     }
                     echo '</ul>';
                 }
@@ -131,6 +146,81 @@ $role = isset($_GET['role']) ? $_GET['role'] : 'resident'; // For demo, switch r
                 echo '<div class="muted">Unable to load logs.</div>';
             }
             ?>
+            
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const selectAll = document.getElementById('selectAllLogs');
+                const deleteSelected = document.getElementById('deleteSelectedLogs');
+                const deleteAll = document.getElementById('deleteAllLogs');
+                const checkboxes = document.querySelectorAll('.logCheckbox');
+                
+                if (selectAll) {
+                    selectAll.addEventListener('change', function() {
+                        checkboxes.forEach(cb => cb.checked = this.checked);
+                        deleteSelected.style.display = this.checked ? 'block' : 'none';
+                    });
+                }
+                
+                // Show/hide Delete Selected button based on checkbox state
+                document.getElementById('logsList')?.addEventListener('change', function(e) {
+                    if (e.target.classList.contains('logCheckbox')) {
+                        const anyChecked = [...checkboxes].some(cb => cb.checked);
+                        deleteSelected.style.display = anyChecked ? 'block' : 'none';
+                        
+                        // Update select all checkbox
+                        const allChecked = [...checkboxes].every(cb => cb.checked);
+                        if (selectAll) selectAll.checked = allChecked;
+                    }
+                });
+                
+                // Delete selected logs
+                deleteSelected?.addEventListener('click', function() {
+                    if (!confirm('Are you sure you want to delete the selected logs?')) return;
+                    
+                    const selectedIds = [...checkboxes].filter(cb => cb.checked).map(cb => cb.value);
+                    if (selectedIds.length === 0) return;
+                    
+                    const formData = new FormData();
+                    formData.append('log_ids', JSON.stringify(selectedIds));
+                    
+                    fetch('delete_logs.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Error: ' + data.message);
+                        }
+                    })
+                    .catch(err => alert('Error: ' + err.message));
+                });
+                
+                // Delete all logs
+                deleteAll?.addEventListener('click', function() {
+                    if (!confirm('Are you sure you want to delete ALL admin/staff logs?')) return;
+                    
+                    const formData = new FormData();
+                    formData.append('delete_all', 'true');
+                    
+                    fetch('delete_logs.php', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert('Error: ' + data.message);
+                        }
+                    })
+                    .catch(err => alert('Error: ' + err.message));
+                });
+            });
+            </script>
         </div>
     <?php endif; ?>
     <?php if ($currentRole === 'resident'): ?>

@@ -18,34 +18,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['message'])) {
     $messageBody = trim($_POST['message']);
     $to = isset($_POST['to']) ? trim($_POST['to']) : 'Barangay Kauswagan';
 
-    // Try to insert into database table `tbl_inquiries` if available
+    // Try to insert into database table `tbl_messages` if available
     try {
         require_once __DIR__ . '/../includes/db.php';
-        // determine resident_id if available
-        $resident_id = null;
-        if (isset($_SESSION['resident_id'])) {
-            $resident_id = (int)$_SESSION['resident_id'];
-        } elseif (isset($_SESSION['user_id'])) {
-            $u = $pdo->prepare('SELECT resident_id FROM tbl_users WHERE user_id = :uid LIMIT 1');
-            $u->execute(['uid' => (int)$_SESSION['user_id']]);
-            $r = $u->fetch();
-            if ($r && !empty($r['resident_id'])) $resident_id = (int)$r['resident_id'];
-        }
+        // determine sender (user_id) and resident mapping
+        $sender_id = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+        $resident_id = isset($_SESSION['resident_id']) ? (int)$_SESSION['resident_id'] : null;
 
-        // store intended recipient in the subject as a lightweight tag so we don't need schema changes
+        // We'll record intended recipient role in the subject as a lightweight tag when receiver_id is not specified
         $subWithTo = ($to ? '[to:' . $to . '] ' : '') . $subject;
-        $stmt = $pdo->prepare('INSERT INTO tbl_inquiries (resident_id, subject, message, date_sent, status) VALUES (:rid, :sub, :msg, NOW(), :st)');
+
+        $stmt = $pdo->prepare('INSERT INTO tbl_messages (sender_id, receiver_id, subject, content, date_sent, status) VALUES (:sid, :rid, :sub, :content, NOW(), :st)');
         $stmt->execute([
-            'rid' => $resident_id,
-            'sub' => $subWithTo,
-            'msg' => $messageBody,
-            'st' => 'unread'
+            ':sid' => $sender_id,
+            ':rid' => null,
+            ':sub' => $subWithTo,
+            ':content' => $messageBody,
+            ':st' => 'unread'
         ]);
 
         // optional: log action
         try {
             $log = $pdo->prepare('INSERT INTO tbl_logs (user_id, activity, action_type) VALUES (:uid, :act, :atype)');
-            $log->execute(['uid' => isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null, 'act' => 'New inquiry submitted', 'atype' => 'INSERT']);
+            $log->execute(['uid' => $sender_id, 'act' => 'New message submitted', 'atype' => 'INSERT']);
         } catch (Exception $e) { /* ignore logging errors */ }
 
         header('Location: messages.php');
@@ -111,22 +106,63 @@ include '../includes/header.php';
                     $viewerRole = isset($_SESSION['role']) ? $_SESSION['role'] : $role;
                     $viewerName = $userName;
 
-                    // If DB is available, also pull inquiries from `tbl_inquiries` and merge into messages list
+                    // If DB is available, also pull messages from `tbl_messages` and inquiries from `tbl_inquiries` and merge into messages list
                     try {
                         if (!isset($pdo)) require_once __DIR__ . '/../includes/db.php';
-                        $inqStmt = $pdo->query('SELECT inquiry_id, resident_id, subject, message, date_sent, status FROM tbl_inquiries ORDER BY date_sent DESC LIMIT 100');
-                        $inqs = $inqStmt->fetchAll(PDO::FETCH_ASSOC);
-                        foreach ($inqs as $iq) {
-                            // resolve resident name if possible
-                            $fromName = 'Resident #' . (int)$iq['resident_id'];
-                            if (!empty($iq['resident_id'])) {
-                                try {
-                                    $rstmt = $pdo->prepare('SELECT CONCAT_WS(" ", first_name, middle_name, last_name, suffix) AS full_name FROM tbl_residents WHERE resident_id = :rid LIMIT 1');
-                                    $rstmt->execute(['rid' => (int)$iq['resident_id']]);
-                                    $rrow = $rstmt->fetch(PDO::FETCH_ASSOC);
-                                    if ($rrow && !empty($rrow['full_name'])) $fromName = $rrow['full_name'];
-                                } catch (Exception $e) { /* ignore */ }
+
+                        // Pull messages table first
+                        try {
+                            $msgStmt = $pdo->query('SELECT m.message_id, m.sender_id, m.receiver_id, m.subject, m.content, m.date_sent, m.status, u.username AS sender_name FROM tbl_messages m LEFT JOIN tbl_users u ON m.sender_id = u.user_id ORDER BY m.date_sent DESC LIMIT 200');
+                            $msgs = $msgStmt->fetchAll(PDO::FETCH_ASSOC);
+                            foreach ($msgs as $ms) {
+                                $fromName = $ms['sender_name'] ?? ('User #' . ($ms['sender_id'] ?? '')); 
+                                $toField = 'Barangay Kauswagan';
+                                $cleanSub = $ms['subject'] ?? '';
+                                // extract [to:role] tag if present
+                                if (preg_match('/^\s*\[to:([^\]]+)\]\s*(.*)$/i', $cleanSub, $mm)) {
+                                    $toField = $mm[1];
+                                    $cleanSub = $mm[2];
+                                } elseif (!empty($ms['receiver_id'])) {
+                                    // try resolve receiver username
+                                    try {
+                                        $rstmt = $pdo->prepare('SELECT username FROM tbl_users WHERE user_id = :uid LIMIT 1');
+                                        $rstmt->execute(['uid' => (int)$ms['receiver_id']]);
+                                        $rr = $rstmt->fetch(PDO::FETCH_ASSOC);
+                                        if ($rr && !empty($rr['username'])) $toField = $rr['username'];
+                                    } catch (Exception $e) { /* ignore */ }
+                                }
+
+                                $messages[] = [
+                                    'id' => 'msg_' . $ms['message_id'],
+                                    'from' => $fromName,
+                                    'from_role' => null,
+                                    'to' => $toField,
+                                    'subject' => $cleanSub,
+                                    'message' => $ms['content'],
+                                    'created_at' => $ms['date_sent'],
+                                    'sender_id' => $ms['sender_id'],
+                                    'receiver_id' => $ms['receiver_id']
+                                ];
                             }
+                        } catch (Exception $e) {
+                            // ignore messages table errors
+                        }
+
+                        // Also merge inquiries (these are still used for complaint replies/notifications)
+                        try {
+                            $inqStmt = $pdo->query('SELECT inquiry_id, resident_id, subject, message, date_sent, status FROM tbl_inquiries ORDER BY date_sent DESC LIMIT 100');
+                            $inqs = $inqStmt->fetchAll(PDO::FETCH_ASSOC);
+                            foreach ($inqs as $iq) {
+                                // resolve resident name if possible
+                                $fromName = 'Resident #' . (int)$iq['resident_id'];
+                                if (!empty($iq['resident_id'])) {
+                                    try {
+                                        $rstmt = $pdo->prepare('SELECT CONCAT_WS(" ", first_name, middle_name, last_name, suffix) AS full_name FROM tbl_residents WHERE resident_id = :rid LIMIT 1');
+                                        $rstmt->execute(['rid' => (int)$iq['resident_id']]);
+                                        $rrow = $rstmt->fetch(PDO::FETCH_ASSOC);
+                                        if ($rrow && !empty($rrow['full_name'])) $fromName = $rrow['full_name'];
+                                    } catch (Exception $e) { /* ignore */ }
+                                }
 
                                 // Try to extract a [to:role] tag from subject if present
                                 $origSub = $iq['subject'] ?? '';
@@ -147,24 +183,36 @@ include '../includes/header.php';
                                     'created_at' => $iq['date_sent'],
                                     'resident_id' => $iq['resident_id']
                                 ];
+                            }
+                        } catch (Exception $e) {
+                            // ignore inquiries read errors; keep file-based messages
                         }
                     } catch (Exception $e) {
                         // ignore DB read errors; keep file-based messages
                     }
 
+                    // Determine numeric ids for more reliable matching
+                    $currentUserId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+                    $currentResidentId = isset($_SESSION['resident_id']) ? (int)$_SESSION['resident_id'] : null;
+
                     // Filter messages based on rules:
-                    // - Admin/Staff see messages addressed to their role, messages addressed to 'Barangay Captain', and messages they sent/received.
-                    // - Residents see messages addressed to 'resident' and messages they sent/received (they should NOT see admin->staff messages).
-                    $visible = array_filter($messages, function($m) use ($viewerRole, $viewerName) {
-                        // always show messages sent by the viewer
-                        if (isset($m['from']) && $m['from'] === $viewerName) return true;
+                    // - Admin/Staff see messages addressed to their role (by [to:role] tag) or messages where receiver_id matches them, and messages they sent.
+                    // - Residents see messages addressed to 'resident', inquiries targeted at their resident_id, and messages they sent.
+                    $visible = array_filter($messages, function($m) use ($viewerRole, $viewerName, $currentUserId, $currentResidentId) {
+                        // If message has sender_id, show if it's the viewer
+                        if (isset($m['sender_id']) && $currentUserId && (int)$m['sender_id'] === $currentUserId) return true;
+                        // If message has receiver_id, show if it targets the viewer
+                        if (isset($m['receiver_id']) && $currentUserId && (int)$m['receiver_id'] === $currentUserId) return true;
+
+                        // If inquiry has resident_id, show to that resident
+                        if (isset($m['resident_id']) && $currentResidentId && (int)$m['resident_id'] === $currentResidentId) return true;
+
                         // show messages explicitly addressed to the viewer by name
                         if (isset($m['to']) && $m['to'] === $viewerName) return true;
 
                         // Admin/Staff rules
                         if ($viewerRole === 'admin' || $viewerRole === 'staff') {
                             if (isset($m['to']) && ($m['to'] === $viewerRole || $m['to'] === 'Barangay Captain' || $m['to'] === 'admin' || $m['to'] === 'staff')) return true;
-                            // also show messages where they are sender (already covered) or messages addressed to residents? not needed
                             return false;
                         }
 
@@ -179,12 +227,12 @@ include '../includes/header.php';
                     });
 
                     // Prepare Sent messages (messages the viewer sent)
-                    $sent = array_filter($messages, function($m) use ($viewerName, $viewerRole) {
+                    $sent = array_filter($messages, function($m) use ($viewerName, $viewerRole, $currentUserId, $currentResidentId) {
+                        // If message has numeric sender_id, match current user id
+                        if (isset($m['sender_id']) && $currentUserId && (int)$m['sender_id'] === $currentUserId) return true;
                         // If the message has resident_id (inquiry), match resident session
-                        if (isset($m['resident_id']) && $viewerRole === 'resident' && isset($_SESSION['resident_id'])) {
-                            if ((int)$_SESSION['resident_id'] === (int)$m['resident_id']) return true;
-                        }
-                        // Otherwise match by sender name
+                        if (isset($m['resident_id']) && $viewerRole === 'resident' && $currentResidentId && (int)$currentResidentId === (int)$m['resident_id']) return true;
+                        // Otherwise fallback to sender name matching
                         if (isset($m['from']) && $m['from'] === $viewerName) return true;
                         return false;
                     });
