@@ -6,21 +6,23 @@ $menus = [
         'Dashboard' => 'dashboard.php',
         'User Management' => 'user_management.php',
         'Resident Record' => 'resident_record.php',
-        'Messages' => 'messages.php',
         'Document Requests' => 'document_requests.php',
+        'Messages' => 'messages.php',
+        'Inquiries' => 'inquiries.php',
         'Complaints & Feedback' => 'complaints_feedback.php',
     ],
     'staff' => [
         'Dashboard' => 'dashboard.php',
-        'Messages' => 'messages.php',
         'Resident Record' => 'resident_record.php',
         'Document Requests' => 'document_requests.php',
+        'Messages' => 'messages.php',
+        'Inquiries' => 'inquiries.php',
         'Complaints & Feedback' => 'complaints_feedback.php',
     ],
     'resident' => [
         'Dashboard' => 'dashboard.php',
         'Document Requests' => 'document_requests.php',
-        'Messages' => 'messages.php',
+        'Submit Inquiry' => 'inquiries.php',
         'Complaints & Feedback' => 'complaints_feedback.php',
     ]
 ];
